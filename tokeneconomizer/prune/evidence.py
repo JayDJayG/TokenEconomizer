@@ -40,6 +40,10 @@ def enrich(rows, calls, host, source, digest, limitations):
     native, usage, events = {}, {}, []
     session_id = agent_id = model = None
     limits = list(limitations)
+    task_starts = any(event.get("type") == "event_msg"
+                      and isinstance(event.get("payload"), dict)
+                      and event["payload"].get("type") == "task_started"
+                      for _line, event, _raw in rows)
     for line, event, _raw in rows:
         location = f"{source}:{line}"
         stamp = timestamp(event.get("timestamp"), location)
@@ -49,6 +53,8 @@ def enrich(rows, calls, host, source, digest, limitations):
             session_id = optional_text(event.get("sessionId", session_id), location)
             agent_id = optional_text(event.get("agentId", agent_id), location)
             if kind not in ("assistant", "user"):
+                if kind == "system" and event.get("subtype") != "init":
+                    events.append(Event(line, "boundary", "", stamp, agent_id))
                 native[line] = (stamp, agent_id, model)
                 continue
             current = optional_text(message.get("model"), location)
@@ -59,6 +65,9 @@ def enrich(rows, calls, host, source, digest, limitations):
                 b["text"] for b in blocks or []
                 if b.get("type") == "text" and isinstance(b.get("text"), str))
             role = kind
+            if kind == "user" and not isinstance(blocks, str) and not any(
+                    block.get("type") != "tool_result" for block in blocks or []):
+                role = ""
             if message.get("usage") is not None and kind == "assistant" and current != "<synthetic>":
                 mid = optional_text(message.get("id"), location)
                 if mid is None:
@@ -79,6 +88,8 @@ def enrich(rows, calls, host, source, digest, limitations):
                 current = optional_text(data.get("model"), location)
                 if current:
                     model = current
+            if "notification" in kind:
+                role = "boundary"
             if kind == "session.shutdown":
                 metrics = data.get("modelMetrics", {})
                 if not isinstance(metrics, dict):
@@ -109,6 +120,10 @@ def enrich(rows, calls, host, source, digest, limitations):
                                      and b.get("type") in ("input_text", "output_text"))
             if kind == "item.completed" and event.get("item", {}).get("type") == "agent_message":
                 role, text = "assistant", event["item"].get("text", "")
+            if (kind in ("turn.started", "compacted") or kind == "event_msg"
+                    and payload.get("type") in ("task_started", "user_message")
+                    or kind == "turn_context" and not task_starts):
+                role = "boundary"
             if kind == "event_msg" and payload.get("type") == "token_count":
                 info = payload.get("info") or {}
                 if not isinstance(info, dict):
@@ -116,7 +131,7 @@ def enrich(rows, calls, host, source, digest, limitations):
                 total = info.get("total_token_usage")
                 if total is not None:
                     usage["total"] = _usage(total, host, model, "total", line, source, "session")
-        if isinstance(text, str) and text and role in ("assistant", "user"):
+        if isinstance(text, str) and (text and role == "assistant" or role in ("user", "boundary")):
             events.append(Event(line, role, text, stamp, agent_id))
         native[line] = (stamp, agent_id, model)
     enriched = []
@@ -142,6 +157,29 @@ def validate_facts(facts, location):
             optional_text(facts[name], f"{location}:{name}")
     if "required" in facts and type(facts["required"]) is not bool:
         raise InputError(f"{location}: required must be a boolean")
+    forwarding = facts.get("forwarding")
+    if forwarding is not None:
+        forwarding = _object(forwarding, f"{location}:forwarding")
+        if forwarding.get("kind") not in ("conversation", "tool_output"):
+            raise InputError(f"{location}: forwarding kind must be conversation or tool_output")
+        for key in ("sufficient", "preserves_requirements"):
+            if type(forwarding.get(key)) is not bool:
+                raise InputError(f"{location}: forwarding {key} must be a boolean")
+        optional_text(forwarding.get("reason"), f"{location}:forwarding reason")
+        for key in ("source_lines", "needed_source_lines"):
+            values = forwarding.get(key)
+            if (not isinstance(values, list) or any(type(n) is not int or n < 1 for n in values)
+                    or len(set(values)) != len(values)):
+                raise InputError(f"{location}: forwarding {key} must be unique positive indexes")
+    communication = facts.get("communication")
+    if communication is not None:
+        communication = _object(communication, f"{location}:communication")
+        for key in ("sender", "receiver", "conversation_id", "progress_fingerprint"):
+            if key in communication:
+                optional_text(communication[key], f"{location}:{key}")
+        for key in ("required", "new_information"):
+            if key in communication and type(communication[key]) is not bool:
+                raise InputError(f"{location}: communication {key} must be a boolean")
     spawning = facts.get("spawn")
     if spawning is not None:
         spawning = _object(spawning, f"{location}:spawn")
