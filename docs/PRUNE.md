@@ -37,7 +37,8 @@ agent result. It requires structured JSON status results, an explicit turn,
 identical request/result data, and non-overlapping calls. New user prompts,
 intervening tool work, changed results, failures, or blocking waits break a match.
 Recognized polling tools are `read_agent` (including a dotted namespace) and
-Claude's `TaskOutput`; arbitrary textual status output is not guessed.
+Claude's `TaskOutput`; arbitrary textual status output and precision-ambiguous
+float-valued requests are not guessed.
 
 Running-state polling is assessed only when the reviewer explicitly confirms
 completion notifications for these tasks:
@@ -249,6 +250,25 @@ Optional `billing` contains a scope-unique `receipt_id`, decimal `usd`,
 twice; their authenticity is not verified. No historical review infers savings.
 The reviewer makes zero model calls; paid consumption of the resulting report
 must be recorded separately if used in a controlled comparison.
+
+## Labeled trace calibration
+
+`te-prune calibrate MANIFEST --format json` checks supplied scenario labels.
+A schema-1 manifest has `kind: "calibration"` and `cases`, each with a unique
+`name`, explicitly named `transcripts`, optional `evidence`/`input_host`/
+`notifications_supported`, and a `labels` map from pattern names to `present`,
+`absent`, or `unassessable`. Relative inputs resolve beside the manifest.
+Only these named inputs are opened; ordinary reports cannot act as manifests.
+
+Counts cover every detected pattern before the three-cut display limit.
+Abstentions are separate from true negatives; missing evidence is not efficiency.
+An abstention cannot match `present` or `absent`. Case details are capped at 20,
+but all cases contribute to metrics and the overall result. Mismatch exits 1,
+malformed inputs exit 2, matched labels exit 0. This replays
+history to measure detection, not savings or real-world task success.
+The checked-in schema vectors are explicitly synthetic and sanitized, based on
+upstream reader/test formats. They are not captured user sessions. Genuine
+session calibration still requires explicitly supplied, sanitized real traces.
 
 ## Limits and output
 

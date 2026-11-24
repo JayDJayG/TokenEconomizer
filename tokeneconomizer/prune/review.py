@@ -1,13 +1,14 @@
 """Strict, source-backed transcript review without session discovery or side calls."""
 import json
 import hashlib
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
 from ..trace import claude_calls, codex_exec_calls, copilot_event_calls
 from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
-from .checks import (duplicate_investigation, extend_finding, finding as make_finding,
+from .checks import (_has_float, duplicate_investigation, extend_finding, finding as make_finding,
                      output_overfetch, rank_findings, redundant_verification)
 from .agents import agent_graph, duplicate_delegation
 from .communication import context_forwarding, ping_pong
@@ -204,8 +205,11 @@ def _codex(rows, source):
             if kind == "item.completed":
                 item = _mapping(event.get("item"), source, line, "item")
             elif kind == "event_msg" and payload.get("type") == "item_completed":
-                item = rollout_item_to_exec(
-                    _mapping(payload.get("item"), source, line, "item"))
+                original = _mapping(payload.get("item"), source, line, "item")
+                item = rollout_item_to_exec(original)
+                if item is None and original.get("type") not in ("Reasoning", "TodoList"):
+                    unsupported.add(str(original.get("type") or "unknown rollout item"))
+                    turn = _turn(turn) if turn is not None else None
             if item is None:
                 continue
             cid = item.get("id")
@@ -219,6 +223,8 @@ def _codex(rows, source):
                     raise InputError(f"{source}:{line}: command must be text")
                 if not isinstance(item.get("aggregated_output", ""), str):
                     raise InputError(f"{source}:{line}: command output must be text")
+                if item.get("exit_code") is not None and type(item["exit_code"]) is not int:
+                    raise InputError(f"{source}:{line}: exit_code must be an integer or null")
             if item.get("type") == "file_change":
                 changes = item.get("changes", [])
                 if not isinstance(changes, list) or any(
@@ -229,6 +235,8 @@ def _codex(rows, source):
                 unsupported.add(str(item.get("type") or "unknown item"))
                 turn = _turn(turn) if turn is not None else None
             for tool, args, result, success in native:
+                if tool == "shell" and item.get("exit_code") is None:
+                    success = None
                 calls.append(ToolCall(cid, tool, args, result, success, line, line, turn))
     for cid, (line, scope, name, args) in pending.items():
         calls.append(ToolCall(cid, name, args, None, None, line, None, scope))
@@ -295,7 +303,7 @@ def load_trace(path: str | Path, host: str | None = None) -> Transcript:
 
 
 def _poll(call):
-    if call.success is False or call.result is None:
+    if call.success is False or call.result is None or _has_float(call.arguments):
         return None
     tool = call.tool.rsplit(".", 1)[-1]
     if tool not in ("read_agent", "TaskOutput"):
@@ -407,6 +415,7 @@ def review(traces: Iterable[Transcript],
     findings.extend(graph_findings)
     exchanges, communication_eligible, cross_source_order = ping_pong(traces)
     findings.extend(exchanges)
+    pattern_counts = dict(sorted(Counter(item["pattern"] for item in findings).items()))
     findings, coalesced = rank_findings(findings)
     costs = cost_report(traces)
     checks = [
@@ -474,6 +483,7 @@ def review(traces: Iterable[Transcript],
         "findings": findings[:3],
         "additional_findings": max(0, len(findings) - 3),
         "coalesced_findings": coalesced,
+        "pattern_counts": pattern_counts,
         "checks": checks,
         "agent_graph": graph,
         "costs": costs,
