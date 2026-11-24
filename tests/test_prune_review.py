@@ -248,7 +248,7 @@ def test_reports_do_not_invent_state_or_savings_and_are_limited_to_three(tmp_pat
     assert len(report["findings"]) == 3 and report["additional_findings"] == 2
     assert "cost" not in report["findings"][0]
     checks = {check["pattern"]: check["status"] for check in report["checks"]}
-    assert checks["redundant_verification"] == "not_implemented"
+    assert checks["redundant_verification"] == "not_assessable"
     assert checks["cost_accounting"] == "not_implemented"
 
 
