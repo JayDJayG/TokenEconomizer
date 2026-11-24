@@ -57,6 +57,9 @@ def _markdown(report):
     for source in report["sources"]:
         for limit in source["limitations"]:
             lines.append(f"- {json.dumps(source['path'])}: {limit}")
+    if report["additional_sources"]:
+        lines.append(f"- {report['additional_sources']} additional source summaries omitted; "
+                     "their calls and costs still contribute to aggregate results.")
     if report["additional_findings"]:
         lines.append(f"- {report['additional_findings']} additional finding(s) omitted "
                      "to keep the review to three cuts.")

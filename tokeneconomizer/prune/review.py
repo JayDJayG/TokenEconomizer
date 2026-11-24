@@ -421,7 +421,8 @@ def review(traces: Iterable[Transcript],
     checks = [
         {"pattern": "completed_agent_rereads",
          "status": "assessed" if eligible else "not_assessable",
-         "reason": "Requires structured status, an explicit turn, and non-blocking call data."},
+         "reason": "Requires structured status, an explicit turn, non-blocking call data, "
+                   "and precision-safe arguments."},
         {"pattern": "busy_polling",
          "status": "assessed" if busy and notifications_supported else "not_assessable",
          "reason": ("Notification support was explicitly supplied by the reviewer."
@@ -479,7 +480,8 @@ def review(traces: Iterable[Transcript],
                      "sha256": trace.sha256, "session_id": trace.session_id,
                      "tool_calls": len(trace.calls), "evidence": coverage(trace),
                      "limitations": list(trace.limitations)}
-                    for trace in traces],
+                    for trace in traces[:20]],
+        "additional_sources": max(0, len(traces) - 20),
         "findings": findings[:3],
         "additional_findings": max(0, len(findings) - 3),
         "coalesced_findings": coalesced,
