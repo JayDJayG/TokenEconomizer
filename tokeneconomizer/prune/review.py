@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from ..trace import claude_calls, codex_exec_calls, copilot_event_calls
 from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
-from .checks import duplicate_investigation
+from .checks import duplicate_investigation, output_overfetch
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -325,7 +325,7 @@ def review(traces: Iterable[Transcript],
     traces = tuple(traces)
     if not traces:
         raise InputError("at least one transcript is required")
-    findings, eligible, busy, duplicate_eligible = [], 0, 0, 0
+    findings, eligible, busy, duplicate_eligible, output_eligible = [], 0, 0, 0, 0
     sources = set()
     for trace in traces:
         if trace.source in sources:
@@ -334,6 +334,9 @@ def review(traces: Iterable[Transcript],
         duplicates, count = duplicate_investigation(trace)
         findings.extend(duplicates)
         duplicate_eligible += count
+        overfetch, count = output_overfetch(trace)
+        findings.extend(overfetch)
+        output_eligible += count
         previous, group = None, None
         for call in trace.calls:
             poll = _poll(call)
@@ -389,9 +392,12 @@ def review(traces: Iterable[Transcript],
          "status": "assessed" if duplicate_eligible else "not_assessable",
          "reason": "Requires non-required investigation, equivalent requests/results, and "
                    "complete supplied call-start input-state evidence."},
+        {"pattern": "output_overfetch",
+         "status": "assessed" if output_eligible else "not_assessable",
+         "reason": "Requires a successful text result and supplied task evidence that a "
+                   "specific line selection is sufficient; size alone is never a finding."},
     ]
     for pattern, reason in (
-            ("output_overfetch", "Result size alone does not prove that a smaller result suffices."),
             ("redundant_verification", "Relevant input state and required reruns must be known."),
             ("agent_graph", "Ancestry, budgets, and justified work need explicit evidence."),
             ("workflow_and_model_use", "Intent and model/task evidence require further checks."),

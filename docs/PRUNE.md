@@ -110,11 +110,22 @@ Required reads, absent purpose/state, new prompts, intervening work, changed
 results, failures, and overlapping calls are preserved. The evidence is
 supplied, not recomputed by Prune.
 
+## Output overfetch
+
+A successful text result can be reviewed when its call annotation declares a
+purpose and `output_need: {"sufficient": true, "reason": "task needs these lines",
+"selected_lines": [1, 3]}`. Line indexes refer to the recorded result, not source
+file line numbers. Prune compares actual UTF-8 byte counts with that selection;
+it does not estimate tokens or infer sufficiency from length. Invalid indexes
+fail explicitly. Without the supplied intent evidence, even a huge result
+remains unassessable. Failed/unknown calls are preserved, and a recommendation
+must retain the full artifact by reference rather than destroy failure evidence.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
 and coverage limits. Unimplemented checks are explicitly labeled, not passed:
-output overfetch, redundant verification, agent graphs,
+redundant verification, agent graphs,
 workflow/model-use checks, and billed-cost accounting remain future work. There
 are no savings estimates or claims that the whole session was efficient.
 

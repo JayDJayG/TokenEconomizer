@@ -142,6 +142,17 @@ def validate_facts(facts, location):
             optional_text(facts[name], f"{location}:{name}")
     if "required" in facts and type(facts["required"]) is not bool:
         raise InputError(f"{location}: required must be a boolean")
+    need = facts.get("output_need")
+    if need is not None:
+        need = _object(need, f"{location}:output_need")
+        if type(need.get("sufficient")) is not bool:
+            raise InputError(f"{location}: output sufficiency must be a boolean")
+        optional_text(need.get("reason"), f"{location}:output reason")
+        selected = need.get("selected_lines")
+        if (not isinstance(selected, list) or not selected
+                or any(type(n) is not int or n < 1 for n in selected)
+                or len(set(selected)) != len(selected)):
+            raise InputError(f"{location}: selected_lines must be unique positive integers")
     state = facts.get("input_state")
     if state is not None:
         state = _object(state, f"{location}:input_state")

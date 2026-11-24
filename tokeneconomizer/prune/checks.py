@@ -1,6 +1,7 @@
 """Small deterministic checks; unknown purpose or input state never proves waste."""
 import json
 from datetime import datetime
+from .types import InputError
 
 READ_SEARCH_TOOLS = {"Read", "Grep", "Glob", "view", "rg", "glob", "read_file", "search"}
 VERIFY_COVERS = {"source", "tests", "configuration", "dependencies", "environment"}
@@ -74,4 +75,34 @@ def duplicate_investigation(trace):
         else:
             group = None
         previous = (key, call)
+    return findings, eligible
+
+
+def output_overfetch(trace):
+    findings, eligible = [], 0
+    for call in trace.calls:
+        need = call.facts.get("output_need") or {}
+        if (call.success is not True or call.result is None
+                or need.get("sufficient") is not True or not need.get("reason")
+                or call.facts.get("purpose") is None):
+            continue
+        selected = need.get("selected_lines")
+        if not isinstance(selected, list) or not selected:
+            continue
+        lines = call.result.splitlines(keepends=True)
+        if any(type(n) is not int or n < 1 or n > len(lines) for n in selected):
+            raise InputError(f"{trace.source}:{call.line}: selected output line is out of range")
+        eligible += 1
+        original = len(call.result.encode("utf-8"))
+        reduced = len("".join(lines[n - 1] for n in sorted(set(selected))).encode("utf-8"))
+        if original <= reduced:
+            continue
+        findings.append(finding(
+            trace, [call], "output_overfetch", "Tool output exceeded the declared evidence need",
+            "Filter or request only the declared needed lines at the source. Keep the full "
+            "artifact available by reference and preserve failures and required full context.",
+            "Supplied task evidence declares the selected result lines sufficient; byte "
+            "counts compare the actual result with that selection, not estimated tokens.",
+            output_bytes=original, needed_output_bytes=reduced,
+            avoidable_output_bytes=original - reduced))
     return findings, eligible
