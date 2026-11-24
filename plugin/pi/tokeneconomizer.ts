@@ -166,7 +166,7 @@ export const TE_COMMANDS: Record<string, { actions: string[]; flags: string[] }>
   history: { actions: ["status", "import"], flags: ["--dry-run", "--status"] },
   repomap: { actions: ["show", "refresh"], flags: [] },
   prune: {
-    actions: ["review", "calibrate"],
+    actions: ["review", "calibrate", "compare"],
     flags: ["--input-host", "--format", "--output", "--evidence", "--notifications-supported"],
   },
 };

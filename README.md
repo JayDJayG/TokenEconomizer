@@ -92,7 +92,9 @@ agent structure, context/communication, workflow patterns, and model-use
 recommendations, with cache-aware cost reporting. Intent-dependent checks need
 explicit supporting metadata; missing evidence is unassessable, not passed.
 See [Prune diagnostics](docs/PRUNE.md) for formats, evidence requirements,
-commands, and limits. The original mechanisms below are unchanged.
+commands, labeled calibration, and offline cost/quality comparisons. The original
+mechanisms below are unchanged. Recorded differences are not verified real-world
+savings; controlled real-session acceptance remains separate.
 
 ## Results
 

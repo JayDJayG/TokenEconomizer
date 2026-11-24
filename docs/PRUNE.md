@@ -270,6 +270,89 @@ The checked-in schema vectors are explicitly synthetic and sanitized, based on
 upstream reader/test formats. They are not captured user sessions. Genuine
 session calibration still requires explicitly supplied, sanitized real traces.
 
+## Offline cost and quality comparisons
+
+`te-prune compare MANIFEST --format json` reviews previously recorded baseline
+and candidate runs. It does not execute tasks, tests, agents, or models. A
+schema-1 manifest requires `kind: "comparison"`, one explicit `cost_basis`
+(`estimated_usd` or `reported_billed_usd`), and nonempty `pairs`:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "comparison",
+  "cost_basis": "estimated_usd",
+  "pairs": [{
+    "name": "scenario",
+    "required_checks": ["tests"],
+    "required_approvals": [],
+    "requirements_complete": true,
+    "baseline": {
+      "run_id": "baseline-1",
+      "transcripts": ["baseline.jsonl"],
+      "evidence": "baseline-evidence.json",
+      "controls": {
+        "task_fingerprint": "recorded-task",
+        "input_fingerprint": "recorded-inputs",
+        "requirements_fingerprint": "recorded-requirements",
+        "environment_fingerprint": "recorded-environment",
+        "pricing_fingerprint": "recorded-price-card"
+      },
+      "outcome": {
+        "task_success": true, "complete": true,
+        "checks": {"tests": true}, "approvals": {}
+      }
+    },
+    "candidate": {
+      "run_id": "candidate-1",
+      "transcripts": ["candidate.jsonl"],
+      "evidence": "candidate-evidence.json",
+      "controls": {
+        "task_fingerprint": "recorded-task",
+        "input_fingerprint": "recorded-inputs",
+        "requirements_fingerprint": "recorded-requirements",
+        "environment_fingerprint": "recorded-environment",
+        "pricing_fingerprint": "recorded-price-card"
+      },
+      "outcome": {
+        "task_success": true, "complete": true,
+        "checks": {"tests": true}, "approvals": {}
+      }
+    }
+  }]
+}
+```
+
+Inputs and evidence resolve beside the manifest and must be explicitly named.
+Run IDs and pair names must be unique. Recordings, message usage, cumulative
+session scopes, or billing receipts cannot be reused across different runs;
+copies are not independent observations. Unknown outcomes may be omitted or
+represented by null booleans; malformed consumed values fail explicitly.
+
+Both runs must match the recorded task/input/requirements/environment controls.
+Estimated comparisons additionally require a matching pricing fingerprint and
+consistent supplied rates/weights for each common model. USD estimates use all
+reported execution, worker, paid-review and legacy overhead scopes under the
+accounting rules above; supplied billing is a separate, never-mixed basis.
+Missing costs, uncertain overlap, or unpriced overhead do not become zero.
+
+All runs, including failures, contribute to totals and quality results. A cheaper
+failure is not a useful reduction. Required checks and approvals must be explicitly
+complete and successful on both sides. Details are capped at 20 pairs, while all
+pairs contribute to aggregate results. Unreported failed runs cannot be independently
+detected: the caller must supply the complete experiment, not just successes.
+Decimal totals preserve supplied receipt precision up to 10,000 digits; unsupported
+precision/range fails explicitly instead of overflowing or rounding spend to zero.
+Exit 0 means comparable costs and preserved
+quality, not guaranteed savings; incomplete or degraded comparisons exit 1, input
+errors exit 2. Results remain conditional on caller-supplied evidence, not causal
+proof from replaying history.
+
+Measured local wall/CPU timers cover manifest processing and input loading/review;
+they exclude serialization, original task time, and later paid report ingestion.
+Prune itself makes zero model calls and returns zero paid reviewer tokens. Include
+separate paid review traces/receipts if an agent consumed these reports.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
