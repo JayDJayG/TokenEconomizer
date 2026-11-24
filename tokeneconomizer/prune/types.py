@@ -74,6 +74,7 @@ class ToolCall:
     agent_id: str | None = None
     model: str | None = None
     facts: dict[str, Any] = field(default_factory=dict)
+    evidence_source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -113,3 +114,4 @@ class Transcript:
     usage: tuple[Usage, ...] = ()
     events: tuple[Event, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
+    evidence_source: str | None = None

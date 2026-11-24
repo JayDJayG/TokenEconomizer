@@ -142,6 +142,15 @@ def validate_facts(facts, location):
             optional_text(facts[name], f"{location}:{name}")
     if "required" in facts and type(facts["required"]) is not bool:
         raise InputError(f"{location}: required must be a boolean")
+    spawning = facts.get("spawn")
+    if spawning is not None:
+        spawning = _object(spawning, f"{location}:spawn")
+        for key in ("agent_id", "parent_agent_id", "objective_fingerprint", "result_fingerprint"):
+            if key in spawning:
+                optional_text(spawning[key], f"{location}:{key}")
+        for key in ("independent", "completed", "new_information"):
+            if key in spawning and type(spawning[key]) is not bool:
+                raise InputError(f"{location}: spawn {key} must be a boolean")
     verification = facts.get("verification")
     if verification is not None:
         verification = _object(verification, f"{location}:verification")
@@ -207,6 +216,18 @@ def apply_evidence(traces, path):
         if entry.get("sha256") != trace.sha256:
             raise InputError(f"{source}: transcript digest mismatch: {name}")
         session = _object(entry.get("session", {}), source)
+        if "task_id" in session:
+            optional_text(session["task_id"], f"{source}:task_id")
+        if "is_root" in session and type(session["is_root"]) is not bool:
+            raise InputError(f"{source}: is_root must be a boolean")
+        budget = session.get("budgets")
+        if budget is not None:
+            budget = _object(budget, f"{source}:budgets")
+            for key, value in budget.items():
+                if key not in ("max_depth", "max_fan_out", "max_spawns"):
+                    raise InputError(f"{source}: unknown agent budget {key}")
+                if type(value) is not int or value < 0:
+                    raise InputError(f"{source}: agent budgets must be nonnegative integers")
         for name in ("agent_id", "parent_agent_id"):
             if name in session:
                 optional_text(session[name], f"{source}:{name}")
@@ -229,11 +250,13 @@ def apply_evidence(traces, path):
             index = matches[0]
             marked.add(index)
             annotated[index] = replace(annotated[index],
-                                       facts=validate_facts(item.get("facts"), source))
+                                       facts=validate_facts(item.get("facts"), source),
+                                       evidence_source=source)
         by_path[resolved] = replace(trace, calls=tuple(annotated), metadata=session,
                                     agent_id=session.get("agent_id", trace.agent_id),
                                     parent_agent_id=session.get("parent_agent_id",
-                                                                trace.parent_agent_id))
+                                                                trace.parent_agent_id),
+                                    evidence_source=source)
     return tuple(by_path[trace.source] for trace in traces)
 
 
