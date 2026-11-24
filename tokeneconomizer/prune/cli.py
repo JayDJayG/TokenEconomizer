@@ -41,7 +41,17 @@ def _markdown(report):
             lines.append(f"   Related: {', '.join(finding['related_patterns'])}.")
             for replacement in finding.get("related_replacements", []):
                 lines.append(f"   Also: {replacement}")
-    lines.extend(["## Coverage and limits", ""])
+    costs = report["costs"]
+    lines.extend(["## Usage and cost", "",
+                  "Token fields are measured; price calculations are estimates, not billing.",
+                  f"Total estimated USD: {costs['total_estimated_usd'] or 'unavailable'}. "
+                  f"Supplied billed USD: {costs['reported_billed_usd'] or 'unavailable'}."])
+    equivalent = costs["effective_input_token_equivalents"]
+    lines.append("Single-model cache-weighted input equivalents: "
+                 + (str(equivalent) if equivalent is not None else "unavailable") + ".")
+    for note in costs["notes"]:
+        lines.append(f"- {note}")
+    lines.extend(["", "## Coverage and limits", ""])
     for check in report["checks"]:
         lines.append(f"- {check['pattern']}: {check['status']}. {check['reason']}")
     for source in report["sources"]:

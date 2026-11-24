@@ -12,6 +12,7 @@ from .checks import (duplicate_investigation, extend_finding, finding as make_fi
 from .agents import agent_graph, duplicate_delegation
 from .communication import context_forwarding, ping_pong
 from .workflows import fragmented_calls, repeated_planning, reusable_procedures, scope_drift
+from .accounting import cost_report, model_use
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -333,6 +334,7 @@ def review(traces: Iterable[Transcript],
     verification_eligible = 0
     delegation_eligible = 0
     context_eligible = 0
+    model_eligible = 0
     workflow_counts = {"fragmented_calls": 0, "scope_drift": 0,
                        "repeated_visible_planning": 0, "reusable_procedure": 0}
     sources = set()
@@ -355,6 +357,9 @@ def review(traces: Iterable[Transcript],
         context, count = context_forwarding(trace)
         findings.extend(context)
         context_eligible += count
+        models, count = model_use(trace)
+        findings.extend(models)
+        model_eligible += count
         for pattern, detector in (("fragmented_calls", fragmented_calls),
                                   ("scope_drift", scope_drift),
                                   ("repeated_visible_planning", repeated_planning),
@@ -403,6 +408,7 @@ def review(traces: Iterable[Transcript],
     exchanges, communication_eligible, cross_source_order = ping_pong(traces)
     findings.extend(exchanges)
     findings, coalesced = rank_findings(findings)
+    costs = cost_report(traces)
     checks = [
         {"pattern": "completed_agent_rereads",
          "status": "assessed" if eligible else "not_assessable",
@@ -443,10 +449,12 @@ def review(traces: Iterable[Transcript],
                       if cross_source_order else
                       "Cross-source ordering is unavailable; only within-source chains are assessed.")},
     ]
-    for pattern, reason in (
-            ("model_use", "Model/task evidence requires further checks."),
-            ("cost_accounting", "No billed-cost or savings calculation is implemented yet.")):
-        checks.append({"pattern": pattern, "status": "not_implemented", "reason": reason})
+    checks.extend([
+        {"pattern": "model_use", "status": "assessed" if model_eligible else "not_assessable",
+         "reason": "Requires billed identity, task class, explicit routing policy and approved quality-preserving substitution."},
+        {"pattern": "cost_accounting", "status": "assessed" if any(trace.usage for trace in traces) else "not_assessable",
+         "reason": "Measured usage, priced estimates and supplied billing remain distinct. "
+                   "Unknown overlap, rates or overhead cannot become zero spend."}])
     for pattern, reason in (
             ("fragmented_calls", "Requires independent calls, distinct model round trips, and confirmed batching."),
             ("scope_drift", "Requires complete lexical task scope and explicit non-required/no-information evidence."),
@@ -468,6 +476,7 @@ def review(traces: Iterable[Transcript],
         "coalesced_findings": coalesced,
         "checks": checks,
         "agent_graph": graph,
+        "costs": costs,
         "safeguards": [
             "Preserve necessary investigation, required checks, failure details, and approvals.",
             "No execution controls, model calls, settings changes, or session discovery.",

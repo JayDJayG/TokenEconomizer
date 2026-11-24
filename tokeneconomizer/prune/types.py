@@ -83,6 +83,7 @@ class ToolCall:
     facts: dict[str, Any] = field(default_factory=dict)
     evidence_source: str | None = None
     message_id: str | None = None
+    billed_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,8 @@ class Usage:
     cache_creation_input_tokens: int | None
     output_tokens: int | None
     cache_creation_1h_input_tokens: int | None = None
+    total_input_tokens: int | None = None
+    reasoning_output_tokens: int | None = None
 
 
 @dataclass(frozen=True)

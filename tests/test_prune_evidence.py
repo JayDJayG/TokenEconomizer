@@ -151,3 +151,10 @@ def test_cli_annotations_read_only_explicit_inputs(tmp_path, monkeypatch, capsys
     assert main(["review", str(path), "--evidence", str(evidence), "--format", "json"]) == 0
     assert set(opened) == allowed
     assert json.loads(capsys.readouterr().out)["sources"][0]["evidence"]["annotations"]
+
+
+def test_distinct_sessions_cannot_share_a_polling_scope(tmp_path):
+    rows = [{"type": "session.start", "data": {"sessionId": "one"}},
+            {"type": "session.start", "data": {"sessionId": "two"}}]
+    with pytest.raises(InputError, match="separate transcripts"):
+        load_trace(write_trace(tmp_path, rows))
