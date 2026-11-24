@@ -1,6 +1,6 @@
 """Cache-aware estimates over reported scopes; never substitute estimates for billing."""
 from dataclasses import asdict
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, InvalidOperation, localcontext, Overflow, Underflow
 import math
 
 from .. import ledger, pricing
@@ -146,8 +146,33 @@ def _mask(traces, flag, has_data):
 
 
 def _usd(effective, quote):
-    return (Decimal(str(effective)) * _amount(quote["input_usd_per_million"], "price")
-            / Decimal(1_000_000)) if quote else None
+    if not quote:
+        return None
+    try:
+        with localcontext() as context:
+            context.traps[Overflow] = context.traps[Underflow] = True
+            return Decimal(str(effective)) * _amount(quote["input_usd_per_million"], "price") / Decimal(1_000_000)
+    except DecimalException as exc:
+        raise InputError("cost estimate exceeds the supported decimal range") from exc
+
+
+def _money_sum(values):
+    values = tuple(values)
+    if not values:
+        return Decimal(0)
+    nonzero = [value for value in values if value]
+    precision = (max(value.adjusted() for value in nonzero)
+                 - min(value.as_tuple().exponent for value in nonzero)
+                 + len(str(len(values))) + 1) if nonzero else 1
+    if precision > 10_000:
+        raise InputError("cost total exceeds the supported decimal precision")
+    try:
+        with localcontext() as context:
+            context.prec = max(context.prec, precision)
+            context.traps[Overflow] = context.traps[Underflow] = True
+            return sum(values, Decimal(0))
+    except DecimalException as exc:
+        raise InputError("cost total exceeds the supported decimal range") from exc
 
 
 def cost_report(traces):
@@ -196,6 +221,8 @@ def cost_report(traces):
                         unit["quote_as_of"] = quote["as_of"]
                     if usage.cache_creation_input_tokens and usage.cache_creation_1h_input_tokens is None:
                         unit["pricing_assumption"] = "Unspecified cache-write lifetime uses the selected rate's default."
+                        if not duplicate and trace.source not in included:
+                            notes.append(unit["pricing_assumption"])
                     amount = _usd(value, quote)
                     unit["estimated_usd"] = str(amount) if amount is not None else None
                     if not duplicate and trace.source not in included:
@@ -257,8 +284,8 @@ def cost_report(traces):
         receipts[identity] = amount
     scope_complete = all(trace.metadata.get("accounting_complete") is True for trace in traces)
     aggregation_safe = not blockers
-    usd_execution = sum(dollars, Decimal(0)) if units and all_priced and aggregation_safe else None
-    total = (usd_execution + sum(overhead_dollars, Decimal(0))
+    usd_execution = _money_sum(dollars) if units and all_priced and aggregation_safe else None
+    total = (_money_sum((usd_execution, *overhead_dollars))
              if usd_execution is not None and overhead_known and scope_complete else None)
     priced_models = {model for model, _value in effective + overhead_values}
     equivalents = (sum(value for _model, value in effective + overhead_values)
@@ -266,7 +293,7 @@ def cost_report(traces):
     if equivalents is not None and not _finite(equivalents):
         equivalents = None
         notes.append("Aggregated token equivalents exceed finite numeric range.")
-    billed = (sum(receipts.values(), Decimal(0))
+    billed = (_money_sum(receipts.values())
               if receipts and billing_complete and not billing_notes and scope_complete else None)
     if not scope_complete:
         notes.append("Complete task/worker/review scope was not explicitly attested.")

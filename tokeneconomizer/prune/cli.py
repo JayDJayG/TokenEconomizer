@@ -8,8 +8,8 @@ from .evidence import apply_evidence
 
 
 def add_review_arguments(parser):
-    parser.add_argument("action", choices=("review", "calibrate"))
-    parser.add_argument("transcripts", nargs="+", metavar="TRANSCRIPT")
+    parser.add_argument("action", choices=("review", "calibrate", "compare"))
+    parser.add_argument("transcripts", nargs="+", metavar="INPUT")
     parser.add_argument("--input-host", choices=HOSTS,
                         help="require this input format; otherwise detect each transcript")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
@@ -66,18 +66,18 @@ def _markdown(report):
 
 def run_review(args):
     try:
-        if args.action == "calibrate":
+        if args.action in ("calibrate", "compare"):
             if len(args.transcripts) != 1 or args.input_host or args.evidence or args.notifications_supported:
-                raise InputError("calibrate requires one manifest; specify review options inside each case")
-            from .evaluation import calibrate
-            report = calibrate(args.transcripts[0])
+                raise InputError(f"{args.action} requires one manifest; specify review options inside each case")
+            from .evaluation import calibrate, compare
+            report = (calibrate if args.action == "calibrate" else compare)(args.transcripts[0])
         else:
             traces = [load_trace(path, args.input_host) for path in args.transcripts]
             if args.evidence:
                 traces = apply_evidence(traces, args.evidence)
             report = review(traces, notifications_supported=args.notifications_supported)
-        text = (json.dumps(report, indent=2) + "\n" if args.format == "json"
-                else _evaluation_markdown(report) if args.action == "calibrate" else _markdown(report))
+        render = {"review": _markdown, "calibrate": _evaluation_markdown, "compare": _comparison_markdown}
+        text = json.dumps(report, indent=2) + "\n" if args.format == "json" else render[args.action](report)
         if args.output:
             with open(args.output, "x", encoding="utf-8", newline="\n") as output:
                 output.write(text)
@@ -86,7 +86,11 @@ def run_review(args):
     except (InputError, OSError) as exc:
         print(f"prune: {exc}", file=sys.stderr)
         return 2
-    return 1 if args.action == "calibrate" and not report["passed"] else 0
+    if args.action == "calibrate":
+        return 0 if report["passed"] else 1
+    if args.action == "compare":
+        return 0 if report["comparable"] and report["quality_preserved"] is True else 1
+    return 0
 
 
 def _evaluation_markdown(report):
@@ -96,6 +100,28 @@ def _evaluation_markdown(report):
         lines.append(f"- {json.dumps(case['name'])}: "
                      + ", ".join(f"{item['pattern']} {'matched' if item['match'] else 'mismatched'}"
                                  for item in case["outcomes"]))
+    return "\n".join(lines + ["", *report["limits"]]) + "\n"
+
+
+def _comparison_markdown(report):
+    lines = ["# Prune recorded-run comparison", "",
+             f"Basis: {report['cost_basis']}. Comparable: {report['comparable']}. "
+             f"Quality preserved: {report['quality_preserved']}.",
+             f"Observed USD reduction: {report['totals']['observed_reduction_usd']}. "
+             f"Useful reduction: {report['useful_reduction']}.",
+             f"Failed runs retained: {report['failed_runs']}; unknown outcomes: {report['unknown_outcomes']}.",
+             "Comparability: " + json.dumps(report["comparability"], sort_keys=True),
+             "", "Local review overhead: " + json.dumps(report["local_review_overhead"]), ""]
+    for pair in report["pairs"]:
+        lines.append(f"- {json.dumps(pair['name'])}: "
+                     f"baseline {pair['baseline']['selected_usd']}, candidate {pair['candidate']['selected_usd']}; "
+                     f"controls {pair['controls']['match']}, prices consistent {pair['pricing_consistent']}.")
+        for side in ("baseline", "candidate"):
+            lines.append(f"  {side}: " + json.dumps(pair[side]["outcome"], sort_keys=True))
+            for note in pair[side]["cost_notes"]:
+                lines.append(f"  {side} cost: {note}")
+        if pair["controls"]["missing"] or pair["controls"]["mismatched"]:
+            lines.append("  Control evidence: " + json.dumps(pair["controls"], sort_keys=True))
     return "\n".join(lines + ["", *report["limits"]]) + "\n"
 
 
