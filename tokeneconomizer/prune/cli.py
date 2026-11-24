@@ -31,7 +31,7 @@ def _markdown(report):
             f"{i}. **{finding['title']}**",
             f"   Evidence: {json.dumps(finding['source'])}, lines "
             f"{finding['first_line']}-{finding['last_line']}; "
-            f"{finding['calls']} calls returned identical status results.",
+            f"{finding['calls']} call(s). {finding['evidence_basis']}",
             f"   Replacement: {finding['replacement']}", "",
         ])
     lines.extend(["## Coverage and limits", ""])
