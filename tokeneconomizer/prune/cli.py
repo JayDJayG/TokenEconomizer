@@ -8,7 +8,7 @@ from .evidence import apply_evidence
 
 
 def add_review_arguments(parser):
-    parser.add_argument("action", choices=("review",))
+    parser.add_argument("action", choices=("review", "calibrate"))
     parser.add_argument("transcripts", nargs="+", metavar="TRANSCRIPT")
     parser.add_argument("--input-host", choices=HOSTS,
                         help="require this input format; otherwise detect each transcript")
@@ -66,12 +66,18 @@ def _markdown(report):
 
 def run_review(args):
     try:
-        traces = [load_trace(path, args.input_host) for path in args.transcripts]
-        if args.evidence:
-            traces = apply_evidence(traces, args.evidence)
-        report = review(traces, notifications_supported=args.notifications_supported)
+        if args.action == "calibrate":
+            if len(args.transcripts) != 1 or args.input_host or args.evidence or args.notifications_supported:
+                raise InputError("calibrate requires one manifest; specify review options inside each case")
+            from .evaluation import calibrate
+            report = calibrate(args.transcripts[0])
+        else:
+            traces = [load_trace(path, args.input_host) for path in args.transcripts]
+            if args.evidence:
+                traces = apply_evidence(traces, args.evidence)
+            report = review(traces, notifications_supported=args.notifications_supported)
         text = (json.dumps(report, indent=2) + "\n" if args.format == "json"
-                else _markdown(report))
+                else _evaluation_markdown(report) if args.action == "calibrate" else _markdown(report))
         if args.output:
             with open(args.output, "x", encoding="utf-8", newline="\n") as output:
                 output.write(text)
@@ -80,7 +86,17 @@ def run_review(args):
     except (InputError, OSError) as exc:
         print(f"prune: {exc}", file=sys.stderr)
         return 2
-    return 0
+    return 1 if args.action == "calibrate" and not report["passed"] else 0
+
+
+def _evaluation_markdown(report):
+    lines = ["# Prune calibration", "", f"Label checks passed: {report['passed']}.",
+             json.dumps(report["metrics"], sort_keys=True), ""]
+    for case in report["cases"]:
+        lines.append(f"- {json.dumps(case['name'])}: "
+                     + ", ".join(f"{item['pattern']} {'matched' if item['match'] else 'mismatched'}"
+                                 for item in case["outcomes"]))
+    return "\n".join(lines + ["", *report["limits"]]) + "\n"
 
 
 def main(argv=None):

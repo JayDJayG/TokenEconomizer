@@ -57,7 +57,7 @@ def enrich(rows, calls, host, source, digest, limitations):
         location = f"{source}:{line}"
         stamp = timestamp(event.get("timestamp"), location)
         kind = event.get("type")
-        message, data, payload = (event.get(key) or {} for key in ("message", "data", "payload"))
+        message, data, payload = (event.get(key, {}) for key in ("message", "data", "payload"))
         message_id = None
         billed_model = None
         if host == "claude":
@@ -141,7 +141,9 @@ def enrich(rows, calls, host, source, digest, limitations):
                     or kind == "turn_context" and not task_starts):
                 role = "boundary"
             if kind == "event_msg" and payload.get("type") == "token_count":
-                info = payload.get("info") or {}
+                info = payload.get("info")
+                if info is None:
+                    info = {}
                 if not isinstance(info, dict):
                     raise InputError(f"{location}: token-count info must be an object")
                 total = info.get("total_token_usage")
