@@ -21,6 +21,7 @@ dependencies = []
 # The plugin's command line (status, microskills, toolprune, config, ...). The plugin ships its
 # own launcher (plugin/scripts/te) and does not need the package installed.
 te = "tokeneconomizer.plugin.cli:main"
+te-prune = "tokeneconomizer.prune.cli:main"
 
 [project.optional-dependencies]
 # Test suite is offline (no Docker / no datasets).

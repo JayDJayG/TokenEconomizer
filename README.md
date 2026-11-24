@@ -77,6 +77,20 @@ carries on as if it were not installed. Its model calls (the fact proposer, and 
 redirect it writes) run through your own agent, on the same plan or login, and their cost is
 included in its reports. What it learns stays on your machine, in `~/.tokeneconomizer`.
 
+## Prune diagnostics (fork extension)
+
+This fork adds an optional, review-only command for explicitly supplied
+transcripts. It does not install hooks, initialize live state, or change agent
+execution controls:
+
+```powershell
+python -m tokeneconomizer.prune review 'C:\sessions\events.jsonl'
+```
+
+The first slice covers conservative polling findings and reports unimplemented
+checks honestly. See [Prune diagnostics](docs/PRUNE.md) for formats, evidence
+requirements, commands, and limits. The original mechanisms below are unchanged.
+
 ## Results
 
 The paper ran five agent–model combinations on the same 277 SWE-Bench tasks from six repositories.

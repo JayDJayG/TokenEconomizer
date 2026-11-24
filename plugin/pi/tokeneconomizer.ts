@@ -165,6 +165,10 @@ export const TE_COMMANDS: Record<string, { actions: string[]; flags: string[] }>
   repos: { actions: ["list", "migrate", "merge"], flags: ["--json", "--quiet"] },
   history: { actions: ["status", "import"], flags: ["--dry-run", "--status"] },
   repomap: { actions: ["show", "refresh"], flags: [] },
+  prune: {
+    actions: ["review"],
+    flags: ["--input-host", "--format", "--output", "--evidence", "--notifications-supported"],
+  },
 };
 
 /** `/te` argument completions: the subcommand, then its action, then options not yet given.
