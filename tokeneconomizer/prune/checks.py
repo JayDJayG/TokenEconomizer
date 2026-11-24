@@ -11,13 +11,16 @@ VERIFY_COVERS = {"source", "tests", "configuration", "dependencies", "environmen
 def finding(trace, calls, pattern, title, replacement, basis, **details):
     return {
         "pattern": pattern, "title": title, "source": trace.source,
-        "first_line": min(call.line for call in calls),
-        "last_line": max(call.result_line or call.line for call in calls),
+        "first_line": min((call.line for call in calls), default=None),
+        "last_line": max((call.result_line or call.line for call in calls), default=None),
         "calls": len(calls), "replacement": replacement, "evidence_basis": basis,
         "safeguards": [
             "Preserve required work, new failures, changed inputs, and user-requested reruns.",
             "This is a recommendation, not a skipped call or an execution control.",
         ],
+        "evidence_sources": sorted({source for source in
+                                   [trace.evidence_source, *(call.evidence_source for call in calls)]
+                                   if source}),
         **details,
     }
 

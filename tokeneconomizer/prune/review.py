@@ -8,6 +8,7 @@ from ..trace import claude_calls, codex_exec_calls, copilot_event_calls
 from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
 from .checks import duplicate_investigation, output_overfetch, redundant_verification
+from .agents import agent_graph, duplicate_delegation
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -327,6 +328,7 @@ def review(traces: Iterable[Transcript],
         raise InputError("at least one transcript is required")
     findings, eligible, busy, duplicate_eligible, output_eligible = [], 0, 0, 0, 0
     verification_eligible = 0
+    delegation_eligible = 0
     sources = set()
     for trace in traces:
         if trace.source in sources:
@@ -341,6 +343,9 @@ def review(traces: Iterable[Transcript],
         verification, count = redundant_verification(trace)
         findings.extend(verification)
         verification_eligible += count
+        delegation, count = duplicate_delegation(trace)
+        findings.extend(delegation)
+        delegation_eligible += count
         previous, group = None, None
         for call in trace.calls:
             poll = _poll(call)
@@ -382,7 +387,9 @@ def review(traces: Iterable[Transcript],
             else:
                 group = None
             previous = (key, call)
-    findings.sort(key=lambda finding: -finding["calls"])
+    graph_findings, graph, graph_assessable = agent_graph(traces)
+    findings.extend(graph_findings)
+    findings.sort(key=lambda finding: (-finding["calls"], -finding.get("avoidable_output_bytes", 0)))
     checks = [
         {"pattern": "completed_agent_rereads",
          "status": "assessed" if eligible else "not_assessable",
@@ -404,9 +411,16 @@ def review(traces: Iterable[Transcript],
          "status": "assessed" if verification_eligible else "not_assessable",
          "reason": "Requires successful deterministic checks, full historical source/test/"
                    "configuration/dependency/environment state, and no required rerun or concern."},
+        {"pattern": "agent_graph",
+         "status": "assessed" if graph_assessable else "not_assessable",
+         "reason": "Only explicit task-scoped parent links are used. Budgets are optional; "
+                   "the observed graph is a lower bound, not complete compliance evidence."},
+        {"pattern": "duplicate_delegation",
+         "status": "assessed" if delegation_eligible else "not_assessable",
+         "reason": "Requires equivalent briefs/inputs and explicit completed-result evidence "
+                   "of no new information or independent value."},
     ]
     for pattern, reason in (
-            ("agent_graph", "Ancestry, budgets, and justified work need explicit evidence."),
             ("workflow_and_model_use", "Intent and model/task evidence require further checks."),
             ("cost_accounting", "No billed-cost or savings calculation is implemented yet.")):
         checks.append({"pattern": pattern, "status": "not_implemented", "reason": reason})
@@ -421,6 +435,7 @@ def review(traces: Iterable[Transcript],
         "findings": findings[:3],
         "additional_findings": max(0, len(findings) - 3),
         "checks": checks,
+        "agent_graph": graph,
         "safeguards": [
             "Preserve necessary investigation, required checks, failure details, and approvals.",
             "No execution controls, model calls, settings changes, or session discovery.",

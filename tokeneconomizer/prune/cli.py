@@ -27,13 +27,16 @@ def _markdown(report):
     if not report["findings"]:
         lines.extend(["No supported high-confidence cut found.", ""])
     for i, finding in enumerate(report["findings"], 1):
+        span = (f", lines {finding['first_line']}-{finding['last_line']}"
+                if finding["first_line"] is not None else "; supplied metadata")
         lines.extend([
             f"{i}. **{finding['title']}**",
-            f"   Evidence: {json.dumps(finding['source'])}, lines "
-            f"{finding['first_line']}-{finding['last_line']}; "
+            f"   Evidence: {json.dumps(finding['source'])}{span}; "
             f"{finding['calls']} call(s). {finding['evidence_basis']}",
             f"   Replacement: {finding['replacement']}", "",
         ])
+        for source in finding.get("evidence_sources", []):
+            lines.append(f"   Supplied evidence: {json.dumps(source)}")
     lines.extend(["## Coverage and limits", ""])
     for check in report["checks"]:
         lines.append(f"- {check['pattern']}: {check['status']}. {check['reason']}")

@@ -134,11 +134,30 @@ state, and turn are findings. Recognized tools include `Bash`, `shell`,
 Changed selectors, outputs, inputs, failures, explicit reruns, missing coverage,
 and unresolved concerns prevent a cut. Prune never executes the check itself.
 
+## Agent structure and duplicate delegation
+
+Related inputs need a common `session.task_id` and explicit `agent_id`/
+`parent_agent_id`; `session.is_root: true` identifies a known task root.
+Successful `spawn_agent`, `task`, `Task`, or `Agent` calls can add child links
+from structured result IDs or call `spawn` annotations. Conflicting identities,
+parents, and cycles fail explicitly. Unlinked sessions are not joined by timing.
+
+Optional root `session.budgets` accepts nonnegative `max_depth`, `max_fan_out`
+(per parent), and `max_spawns`. Exceedances are budget observations, not claims
+that justified parallel work was wasteful. No universal cap is imposed or
+enforced. Metrics are observed lower bounds; absent links cannot prove compliance.
+Reports bound displayed nodes to 20 while computing metrics over the full graph.
+
+Duplicate delegation additionally needs equivalent briefs and complete call-start
+input states, plus `spawn` facts: `independent: false`, `completed: true`,
+`new_information: false`, and matching `objective_fingerprint` and
+`result_fingerprint`. Different worker IDs alone do not prove duplicated work.
+Supplied evidence paths are retained as provenance, not new access permissions.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
 and coverage limits. Unimplemented checks are explicitly labeled, not passed:
-agent graphs,
 workflow/model-use checks, and billed-cost accounting remain future work. There
 are no savings estimates or claims that the whole session was efficient.
 
