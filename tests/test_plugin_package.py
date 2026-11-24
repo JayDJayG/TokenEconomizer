@@ -530,6 +530,7 @@ def test_the_bundle_runs_without_a_checkout(tmp_path):
 
 # ---- the layering the README promises ------------------------------------------------------
 MECHANISMS = ("microskills", "toolprune", "loopguard", "trace")
+CORE_PACKAGES = MECHANISMS + ("prune",)
 CORE_MODULES = ("config.py", "domain.py", "ledger.py", "pricing.py", "stage.py")
 
 
@@ -552,7 +553,7 @@ def _core_files():
     pkg = os.path.join(REPO, "tokeneconomizer")
     for name in CORE_MODULES + ("__init__.py",):
         yield os.path.join(pkg, name), 0
-    for sub in MECHANISMS:
+    for sub in CORE_PACKAGES:
         for name in sorted(os.listdir(os.path.join(pkg, sub))):
             if name.endswith(".py"):
                 yield os.path.join(pkg, sub, name), 1
@@ -571,7 +572,7 @@ def test_the_mechanisms_never_import_the_plugin_runtime():
                 reaches_top = level == depth + 1
                 assert not (reaches_top and parts[0] == "plugin"), f"{path} imports .{mod}"
     probe = ("import sys, tokeneconomizer, tokeneconomizer.domain, tokeneconomizer.stage\n"
-             + "".join(f"import tokeneconomizer.{m}\n" for m in MECHANISMS)
+             + "".join(f"import tokeneconomizer.{m}\n" for m in CORE_PACKAGES)
              + "print(sorted(m for m in sys.modules if m.startswith('tokeneconomizer.plugin') "
                "or m.split('.')[0] in ('te_bench', 'te_harness', 'te_live')))")
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, cwd=REPO)
@@ -585,7 +586,7 @@ def test_the_plugin_ships_and_loads_no_benchmark_code():
     shipped = os.path.join(REPO, "tokeneconomizer")       # what lib/ links (below)
     assert sorted(n for n in os.listdir(shipped)
                   if os.path.isdir(os.path.join(shipped, n)) and n != "__pycache__") == sorted(
-        MECHANISMS + ("plugin",))
+        CORE_PACKAGES + ("plugin",))
     for gone in ("adapters", "mechanisms", "vendor", "facade.py", "workloads.py", "runner.py",
                  "arms.py", "baselines"):
         assert not os.path.exists(os.path.join(shipped, gone)), gone

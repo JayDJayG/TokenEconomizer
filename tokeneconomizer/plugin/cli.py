@@ -37,6 +37,7 @@
     te repos merge KEY [INTO]         merge the state directory KEY into INTO (default: this
                                       repository's), for state whose checkouts are gone
     te doctor                         check the installation
+    te prune review TRANSCRIPT ...    review only named transcripts; no live state or controls
     te --host copilot probe           real Copilot sessions in a throwaway repository: does a
                                       learned fact change what the model does, and what does the
                                       deny list save (makes model calls; see plugin/probe.py)
@@ -1054,6 +1055,10 @@ def build_parser():
     p.add_argument("--model", default=None)
     p.add_argument("--keep", action="store_true")
     p.set_defaults(fn=cmd_probe)
+    from ..prune.cli import add_review_arguments, run_review
+    p = add("prune")
+    add_review_arguments(p)
+    p.set_defaults(fn=run_review)
     return ap
 
 
@@ -1104,6 +1109,8 @@ def main(argv=None):
         print(f"te: could not read the arguments: {e}")
         return 2
     args = build_parser().parse_args(argv)
+    if args.cmd == "prune":
+        return args.fn(args)
     if args.host is None:
         args.host = hosts.default_host(recent=_recent_host(args.cwd))
     try:
