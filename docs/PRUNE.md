@@ -176,11 +176,43 @@ breaks the chain. Cross-file chains require complete timezone-aware start/end
 and user-event timestamps with no known normalization gaps; otherwise only
 within-file chains are assessed.
 
+## Workflow diagnostics
+
+`batch` facts (`group`, `independent: true`, `supported: true`) identify calls
+that can share a request. Distinct native Claude message IDs, or supplied
+`round_trip_id` values, must prove separate model round trips. Already batched,
+overlapping, dependent, or unknown-capability calls are preserved.
+
+An optional `session.scope_policy` declares `id`, `flavour` (`windows` or
+`posix`), `complete: true`, `allowed_paths`, and optional `exceptions`.
+Known read paths can be compared lexically only when their call names that
+`scope_policy_id`, is `required: false`, and records `new_information: false`.
+Mixed absolute/relative paths and `..` remain unassessable; no filesystem or
+symlink discovery occurs. Scope observations preserve justified investigation.
+
+`events` annotations identify visible `line` and `role`, with `facts.planning`
+containing `scope`, `input_fingerprint`, `progress_fingerprint`,
+`inputs_complete: true`, `required: false`, and `new_information: false`.
+The historical snapshot also needs `at: "event"` and timezone-aware `captured_at`.
+Only identical visible plans without intervening work or new prompts are
+findings. Hidden thinking/reasoning blocks are never inspected. Repeated Claude
+message snapshots are not new planning events.
+
+Call `workflow` facts can nominate a `procedure_id`, distinct `run_id`,
+consecutive positive `step`, stable `step_key`, `reusable: true`, and
+`final_step: true` on the last step. Two complete successful matching procedures
+produce an optional skill candidate, not a waste verdict. No skill is written,
+installed, or executed.
+
+Cuts on the same recorded work are coalesced with their related replacements.
+Waste cuts rank ahead of scope/budget observations and optional skill candidates;
+ranking uses observed calls/messages and bytes, never invented monetary savings.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
 and coverage limits. Unimplemented checks are explicitly labeled, not passed:
-workflow/model-use checks, and billed-cost accounting remain future work. There
+model-use checks and billed-cost accounting remain future work. There
 are no savings estimates or claims that the whole session was efficient.
 
 By default the report goes to stdout. `--output FILE` creates only the requested

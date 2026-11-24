@@ -47,6 +47,13 @@ def timestamp(value, location):
     return value
 
 
+def epoch(value):
+    if value is None:
+        return None
+    stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return stamp.timestamp() if stamp.tzinfo is not None else None
+
+
 def optional_text(value, location):
     if value is not None and (not isinstance(value, str) or not value):
         raise InputError(f"{location}: expected nonempty text or null")
@@ -75,6 +82,7 @@ class ToolCall:
     model: str | None = None
     facts: dict[str, Any] = field(default_factory=dict)
     evidence_source: str | None = None
+    message_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +93,8 @@ class Event:
     timestamp: str | None = None
     agent_id: str | None = None
     facts: dict[str, Any] = field(default_factory=dict)
+    evidence_source: str | None = None
+    message_id: str | None = None
 
 
 @dataclass(frozen=True)

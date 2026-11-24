@@ -37,6 +37,10 @@ def _markdown(report):
         ])
         for source in finding.get("evidence_sources", []):
             lines.append(f"   Supplied evidence: {json.dumps(source)}")
+        if finding.get("related_patterns"):
+            lines.append(f"   Related: {', '.join(finding['related_patterns'])}.")
+            for replacement in finding.get("related_replacements", []):
+                lines.append(f"   Also: {replacement}")
     lines.extend(["## Coverage and limits", ""])
     for check in report["checks"]:
         lines.append(f"- {check['pattern']}: {check['status']}. {check['reason']}")

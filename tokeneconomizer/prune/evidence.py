@@ -40,6 +40,7 @@ def enrich(rows, calls, host, source, digest, limitations):
     native, usage, events = {}, {}, []
     session_id = agent_id = model = None
     limits = list(limitations)
+    visible_ids = set()
     task_starts = any(event.get("type") == "event_msg"
                       and isinstance(event.get("payload"), dict)
                       and event["payload"].get("type") == "task_started"
@@ -49,14 +50,16 @@ def enrich(rows, calls, host, source, digest, limitations):
         stamp = timestamp(event.get("timestamp"), location)
         kind = event.get("type")
         message, data, payload = (event.get(key) or {} for key in ("message", "data", "payload"))
+        message_id = None
         if host == "claude":
             session_id = optional_text(event.get("sessionId", session_id), location)
             agent_id = optional_text(event.get("agentId", agent_id), location)
             if kind not in ("assistant", "user"):
                 if kind == "system" and event.get("subtype") != "init":
                     events.append(Event(line, "boundary", "", stamp, agent_id))
-                native[line] = (stamp, agent_id, model)
+                native[line] = (stamp, agent_id, model, None)
                 continue
+            message_id = optional_text(message.get("id"), location)
             current = optional_text(message.get("model"), location)
             if current and current != "<synthetic>":
                 model = current
@@ -132,14 +135,17 @@ def enrich(rows, calls, host, source, digest, limitations):
                 if total is not None:
                     usage["total"] = _usage(total, host, model, "total", line, source, "session")
         if isinstance(text, str) and (text and role == "assistant" or role in ("user", "boundary")):
-            events.append(Event(line, role, text, stamp, agent_id))
-        native[line] = (stamp, agent_id, model)
+            key = (message_id, role, text)
+            if message_id is None or key not in visible_ids:
+                events.append(Event(line, role, text, stamp, agent_id, message_id=message_id))
+                visible_ids.add(key)
+        native[line] = (stamp, agent_id, model, message_id)
     enriched = []
     for call in calls:
         start = native[call.line]
         end = native.get(call.result_line, (None, None, None))
         enriched.append(replace(call, timestamp=start[0], completed_at=end[0],
-                                agent_id=start[1], model=start[2]))
+                                agent_id=start[1], model=start[2], message_id=start[3]))
     return Transcript(source, host, len(rows), tuple(enriched), tuple(limits), digest,
                       session_id, agent_id, usage=tuple(usage.values()), events=tuple(events))
 
@@ -152,11 +158,27 @@ def _object(value, location):
 
 def validate_facts(facts, location):
     facts = _object(facts, location)
-    for name in ("purpose", "scope"):
+    for name in ("purpose", "scope", "scope_policy_id"):
         if name in facts:
             optional_text(facts[name], f"{location}:{name}")
     if "required" in facts and type(facts["required"]) is not bool:
         raise InputError(f"{location}: required must be a boolean")
+    if "new_information" in facts and type(facts["new_information"]) is not bool:
+        raise InputError(f"{location}: new_information must be a boolean")
+    for section, text_keys, bool_keys in (
+            ("batch", ("group", "round_trip_id"), ("independent", "supported")),
+            ("workflow", ("procedure_id", "run_id", "step_key"), ("final_step", "reusable"))):
+        value = facts.get(section)
+        if value is not None:
+            value = _object(value, f"{location}:{section}")
+            for key in text_keys:
+                if key in value:
+                    optional_text(value[key], f"{location}:{key}")
+            for key in bool_keys:
+                if key in value and type(value[key]) is not bool:
+                    raise InputError(f"{location}: {section} {key} must be a boolean")
+            if section == "workflow" and (type(value.get("step")) is not int or value["step"] < 1):
+                raise InputError(f"{location}: workflow step must be a positive integer")
     forwarding = facts.get("forwarding")
     if forwarding is not None:
         forwarding = _object(forwarding, f"{location}:forwarding")
@@ -266,6 +288,16 @@ def apply_evidence(traces, path):
                     raise InputError(f"{source}: unknown agent budget {key}")
                 if type(value) is not int or value < 0:
                     raise InputError(f"{source}: agent budgets must be nonnegative integers")
+        policy = session.get("scope_policy")
+        if policy is not None:
+            policy = _object(policy, f"{source}:scope_policy")
+            optional_text(policy.get("id"), f"{source}:scope policy ID")
+            if policy.get("flavour") not in ("windows", "posix") or type(policy.get("complete")) is not bool:
+                raise InputError(f"{source}: scope policy needs flavour and explicit completeness")
+            for key in ("allowed_paths", "exceptions"):
+                values = policy.get(key, [])
+                if not isinstance(values, list) or any(not isinstance(n, str) or not n for n in values):
+                    raise InputError(f"{source}: scope paths must be nonempty strings")
         for name in ("agent_id", "parent_agent_id"):
             if name in session:
                 optional_text(session[name], f"{source}:{name}")
@@ -290,7 +322,34 @@ def apply_evidence(traces, path):
             annotated[index] = replace(annotated[index],
                                        facts=validate_facts(item.get("facts"), source),
                                        evidence_source=source)
-        by_path[resolved] = replace(trace, calls=tuple(annotated), metadata=session,
+        annotated_events, event_marks = list(trace.events), set()
+        event_entries = entry.get("events", [])
+        if not isinstance(event_entries, list):
+            raise InputError(f"{source}: event annotations must be a list")
+        for item in event_entries:
+            item = _object(item, source)
+            matches = [i for i, event in enumerate(annotated_events)
+                       if type(item.get("line")) is int and event.line == item["line"]
+                       and event.role == item.get("role")]
+            if len(matches) != 1 or matches[0] in event_marks:
+                raise InputError(f"{source}: annotation must identify one unique visible event")
+            index = matches[0]
+            event_marks.add(index)
+            facts = _object(item.get("facts"), source)
+            planning = facts.get("planning")
+            if planning is not None:
+                planning = _object(planning, source)
+                for key in ("scope", "input_fingerprint", "progress_fingerprint"):
+                    if key in planning:
+                        optional_text(planning[key], f"{source}:{key}")
+                for key in ("inputs_complete", "required", "new_information"):
+                    if key in planning and type(planning[key]) is not bool:
+                        raise InputError(f"{source}: planning {key} must be a boolean")
+                timestamp(planning.get("captured_at"), f"{source}:planning snapshot")
+                if "at" in planning and planning["at"] != "event":
+                    raise InputError(f"{source}: planning snapshot at must be event")
+            annotated_events[index] = replace(annotated_events[index], facts=facts, evidence_source=source)
+        by_path[resolved] = replace(trace, calls=tuple(annotated), events=tuple(annotated_events), metadata=session,
                                     agent_id=session.get("agent_id", trace.agent_id),
                                     parent_agent_id=session.get("parent_agent_id",
                                                                 trace.parent_agent_id),
@@ -306,6 +365,10 @@ def coverage(trace):
         "input_states": sum(call.facts.get("input_state") is not None for call in trace.calls),
         "model_identity": sum(call.model is not None for call in trace.calls),
         "usage_units": len(trace.usage),
-        "visible_messages": len(trace.events),
-        "annotations": bool(trace.metadata or any(call.facts for call in trace.calls)),
+        "visible_messages": sum(bool(event.text) and event.role in ("user", "assistant")
+                                for event in trace.events),
+        "scope_boundaries": sum(event.role == "boundary" for event in trace.events),
+        "annotations": bool(trace.evidence_source or trace.metadata
+                            or any(call.facts for call in trace.calls)
+                            or any(event.facts for event in trace.events)),
     }
