@@ -148,6 +148,8 @@ def validate_facts(facts, location):
         optional_text(state.get("fingerprint"), f"{location}:fingerprint")
         optional_text(state.get("scope"), f"{location}:scope")
         timestamp(state.get("captured_at"), f"{location}:captured_at")
+        if "at" in state and state["at"] != "call_start":
+            raise InputError(f"{location}: input-state at must be call_start")
         if "complete" in state and type(state["complete"]) is not bool:
             raise InputError(f"{location}: complete must be a boolean")
         covers = state.get("covers", [])

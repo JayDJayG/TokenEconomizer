@@ -95,11 +95,26 @@ configuration, dependencies, and environment. Reports expose coverage counts
 without presenting absent metadata as a passed check. Annotations do not grant
 permission to read any additional files.
 
+## Duplicate investigation
+
+Read/search checks recognize `Read`, `Grep`, `Glob`, `view`, `rg`, `glob`,
+`read_file`, and `search`, including dotted namespaces. Consecutive calls must
+have the same turn, exact equivalent arguments and identical successful
+results. Each call needs `purpose: "investigation"`, `required: false`, and a
+complete `input_state` with matching fingerprint, scope, and coverage.
+`input_state.at` must be `"call_start"` and `captured_at` must name the historical
+snapshot. A future-dated snapshot is not usable. Float-valued requests are not
+compared because JSON decoding can lose precision.
+
+Required reads, absent purpose/state, new prompts, intervening work, changed
+results, failures, and overlapping calls are preserved. The evidence is
+supplied, not recomputed by Prune.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
 and coverage limits. Unimplemented checks are explicitly labeled, not passed:
-duplicate investigation, output overfetch, redundant verification, agent graphs,
+output overfetch, redundant verification, agent graphs,
 workflow/model-use checks, and billed-cost accounting remain future work. There
 are no savings estimates or claims that the whole session was efficient.
 

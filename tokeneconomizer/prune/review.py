@@ -7,6 +7,7 @@ from typing import Any, Iterable
 from ..trace import claude_calls, codex_exec_calls, copilot_event_calls
 from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
+from .checks import duplicate_investigation
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -324,12 +325,15 @@ def review(traces: Iterable[Transcript],
     traces = tuple(traces)
     if not traces:
         raise InputError("at least one transcript is required")
-    findings, eligible, busy = [], 0, 0
+    findings, eligible, busy, duplicate_eligible = [], 0, 0, 0
     sources = set()
     for trace in traces:
         if trace.source in sources:
             raise InputError(f"duplicate input transcript: {trace.source}")
         sources.add(trace.source)
+        duplicates, count = duplicate_investigation(trace)
+        findings.extend(duplicates)
+        duplicate_eligible += count
         previous, group = None, None
         for call in trace.calls:
             poll = _poll(call)
@@ -381,9 +385,12 @@ def review(traces: Iterable[Transcript],
          "reason": ("Notification support was explicitly supplied by the reviewer."
                     if notifications_supported else
                     "Notification support is unknown; running-state repeats are not findings.")},
+        {"pattern": "duplicate_reads_searches",
+         "status": "assessed" if duplicate_eligible else "not_assessable",
+         "reason": "Requires non-required investigation, equivalent requests/results, and "
+                   "complete supplied call-start input-state evidence."},
     ]
     for pattern, reason in (
-            ("duplicate_reads_searches", "Relevant input fingerprints and purpose are required."),
             ("output_overfetch", "Result size alone does not prove that a smaller result suffices."),
             ("redundant_verification", "Relevant input state and required reruns must be known."),
             ("agent_graph", "Ancestry, budgets, and justified work need explicit evidence."),
