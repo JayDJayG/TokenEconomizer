@@ -94,7 +94,9 @@ explicit supporting metadata; missing evidence is unassessable, not passed.
 See [Prune diagnostics](docs/PRUNE.md) for formats, evidence requirements,
 commands, labeled calibration, and offline cost/quality comparisons. The original
 mechanisms below are unchanged. Recorded differences are not verified real-world
-savings; controlled real-session acceptance remains separate.
+savings; controlled real-session acceptance remains separate. A disabled-by-default
+`PruneReviewStage` can attach reports after a task when a caller explicitly enables
+it and supplies absolute input paths; it never changes launch hooks.
 
 ## Results
 

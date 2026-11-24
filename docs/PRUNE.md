@@ -353,6 +353,43 @@ they exclude serialization, original task time, and later paid report ingestion.
 Prune itself makes zero model calls and returns zero paid reviewer tokens. Include
 separate paid review traces/receipts if an agent consumed these reports.
 
+## Optional after-task reporting
+
+`PruneReviewStage` subclasses the shared `Stage` API, but is never automatically
+registered with live hooks or experiment runners. The default is disabled and
+does not inspect inputs, read files, or modify the caller's task record.
+`before_task`, `build_tools`, and `run_kwargs` retain the base no-op behavior even
+when reporting is enabled.
+
+```python
+from tokeneconomizer.prune.stage import PruneReviewStage
+
+reporter = PruneReviewStage(enabled=True)
+row = {"prune_inputs": {
+    "transcripts": [r"C:\sessions\events.jsonl"],
+    "evidence": r"C:\sessions\evidence.json"
+}}
+srow = {"resolved": True}  # caller-owned task result
+paid_reviewer_tokens = reporter.after_task({}, row, None, srow)
+report = srow["prune_review"]
+```
+
+Every transcript and optional evidence file must be an explicit absolute path.
+`run_dir_path` is intentionally ignored: it does not authorize transcript or
+subagent discovery. Normal review flags may be set inside `prune_inputs`.
+The reporter attaches at most three cuts, coverage/cost limits, and measured
+local wall/CPU overhead to `srow["prune_review"]`, without changing task outcomes.
+Source detail is capped at 20 records with an explicit omitted-source count;
+all supplied calls and costs still contribute to aggregate results.
+It writes no report file and returns zero paid reviewer tokens.
+
+Expected input/I/O failures produce an explicit `status: "error"` record and
+stderr notification, with no stale success report. Zero returned tokens are not
+a success status. Programming errors propagate rather than being hidden.
+Persistence or paid consumption of this caller-owned report remains the caller's
+responsibility. No budgets, agent lifecycles, models, settings, or skills are
+changed by this integration.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
