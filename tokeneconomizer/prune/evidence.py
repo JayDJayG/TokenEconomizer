@@ -19,6 +19,8 @@ def _usage(raw, host, model, unit, line, source, scope):
                   "cache_write_input_tokens", "output_tokens"),
     }[host]
     values = [count(raw.get(key), f"{source}:{line}:{key}") for key in names]
+    total_input = (sum(values[:3]) if host == "claude" and all(n is not None for n in values[:3])
+                   else values[0] if host != "claude" else None)
     if host != "claude" and all(value is not None for value in values[:3]):
         fresh = values[0] - values[1] - values[2]
         if fresh < 0:
@@ -33,7 +35,11 @@ def _usage(raw, host, model, unit, line, source, scope):
                  f"{source}:{line}:ephemeral_1h_input_tokens")
     if hour is not None and (values[2] is None or hour > values[2]):
         raise InputError(f"{source}:{line}: 1-hour cache writes exceed total cache writes")
-    return Usage(unit, line, model, scope, *values, hour)
+    reasoning = count(raw.get("reasoningTokens" if host == "copilot" else "reasoning_output_tokens"),
+                      f"{source}:{line}:reasoning tokens")
+    if reasoning is not None and values[3] is not None and reasoning > values[3]:
+        raise InputError(f"{source}:{line}: reasoning tokens exceed total output")
+    return Usage(unit, line, model, scope, *values, hour, total_input, reasoning)
 
 
 def enrich(rows, calls, host, source, digest, limitations):
@@ -41,6 +47,8 @@ def enrich(rows, calls, host, source, digest, limitations):
     session_id = agent_id = model = None
     limits = list(limitations)
     visible_ids = set()
+    codex_models = set()
+    sessions, actors = set(), set()
     task_starts = any(event.get("type") == "event_msg"
                       and isinstance(event.get("payload"), dict)
                       and event["payload"].get("type") == "task_started"
@@ -51,18 +59,21 @@ def enrich(rows, calls, host, source, digest, limitations):
         kind = event.get("type")
         message, data, payload = (event.get(key) or {} for key in ("message", "data", "payload"))
         message_id = None
+        billed_model = None
         if host == "claude":
             session_id = optional_text(event.get("sessionId", session_id), location)
             agent_id = optional_text(event.get("agentId", agent_id), location)
             if kind not in ("assistant", "user"):
                 if kind == "system" and event.get("subtype") != "init":
                     events.append(Event(line, "boundary", "", stamp, agent_id))
-                native[line] = (stamp, agent_id, model, None)
+                native[line] = (stamp, agent_id, model, None, None)
                 continue
             message_id = optional_text(message.get("id"), location)
             current = optional_text(message.get("model"), location)
             if current and current != "<synthetic>":
                 model = current
+                if kind == "assistant":
+                    billed_model = current
             blocks = message.get("content", "")
             text = blocks if isinstance(blocks, str) else "\n".join(
                 b["text"] for b in blocks or []
@@ -114,6 +125,8 @@ def enrich(rows, calls, host, source, digest, limitations):
                 session_id = optional_text(payload.get("id", payload.get("session_id")), location)
             if kind == "turn_context":
                 model = optional_text(payload.get("model", model), location)
+                if model:
+                    codex_models.add(model)
             if kind == "response_item" and payload.get("type") == "message":
                 role = payload.get("role", "")
                 blocks = payload.get("content", [])
@@ -134,18 +147,28 @@ def enrich(rows, calls, host, source, digest, limitations):
                 total = info.get("total_token_usage")
                 if total is not None:
                     usage["total"] = _usage(total, host, model, "total", line, source, "session")
+        if session_id:
+            sessions.add(session_id)
+        if agent_id:
+            actors.add(agent_id)
+        if len(sessions) > 1 or len(actors) > 1:
+            raise InputError(f"{source}:{line}: multiple native sessions or agents; supply separate transcripts")
         if isinstance(text, str) and (text and role == "assistant" or role in ("user", "boundary")):
             key = (message_id, role, text)
             if message_id is None or key not in visible_ids:
                 events.append(Event(line, role, text, stamp, agent_id, message_id=message_id))
                 visible_ids.add(key)
-        native[line] = (stamp, agent_id, model, message_id)
+        native[line] = (stamp, agent_id, model, message_id, billed_model)
+    if host == "codex" and len(codex_models) > 1 and usage:
+        usage = {key: replace(value, model=None) for key, value in usage.items()}
+        limits.append("Codex cumulative usage spans multiple models; attribution is unknown.")
     enriched = []
     for call in calls:
         start = native[call.line]
         end = native.get(call.result_line, (None, None, None))
         enriched.append(replace(call, timestamp=start[0], completed_at=end[0],
-                                agent_id=start[1], model=start[2], message_id=start[3]))
+                                agent_id=start[1], model=start[2], message_id=start[3],
+                                billed_model=start[4]))
     return Transcript(source, host, len(rows), tuple(enriched), tuple(limits), digest,
                       session_id, agent_id, usage=tuple(usage.values()), events=tuple(events))
 
@@ -165,6 +188,15 @@ def validate_facts(facts, location):
         raise InputError(f"{location}: required must be a boolean")
     if "new_information" in facts and type(facts["new_information"]) is not bool:
         raise InputError(f"{location}: new_information must be a boolean")
+    model_use = facts.get("model_use")
+    if model_use is not None:
+        model_use = _object(model_use, f"{location}:model_use")
+        for key in ("policy_id", "task_class", "billed_model"):
+            if key in model_use:
+                optional_text(model_use[key], f"{location}:{key}")
+        for key in ("substitution_approved", "quality_preserved", "context_sufficient"):
+            if key in model_use and type(model_use[key]) is not bool:
+                raise InputError(f"{location}: model_use {key} must be a boolean")
     for section, text_keys, bool_keys in (
             ("batch", ("group", "round_trip_id"), ("independent", "supported")),
             ("workflow", ("procedure_id", "run_id", "step_key"), ("final_step", "reusable"))):
@@ -276,6 +308,8 @@ def apply_evidence(traces, path):
         if entry.get("sha256") != trace.sha256:
             raise InputError(f"{source}: transcript digest mismatch: {name}")
         session = _object(entry.get("session", {}), source)
+        from .accounting import validate_accounting
+        validate_accounting(session, source)
         if "task_id" in session:
             optional_text(session["task_id"], f"{source}:task_id")
         if "is_root" in session and type(session["is_root"]) is not bool:

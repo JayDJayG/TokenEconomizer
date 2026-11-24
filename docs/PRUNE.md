@@ -208,12 +208,54 @@ Cuts on the same recorded work are coalesced with their related replacements.
 Waste cuts rank ahead of scope/budget observations and optional skill candidates;
 ranking uses observed calls/messages and bytes, never invented monetary savings.
 
+## Model and cost reporting
+
+Model diagnostics require `session.model_policy` with an `id` and a
+`preferred_models` task-class map. Call `model_use` evidence needs the matching
+`policy_id`, `task_class`, `substitution_approved: true`,
+`quality_preserved: true`, and `context_sufficient: true`. Billed identity comes
+from a Claude message or explicit `billed_model` evidence, never a host's selected
+model alone. This reports a policy mismatch, not a claim that a named model is
+universally excessive or that a cheaper model preserves every task's quality.
+
+Cost reports keep measured token/cache fields separate from priced estimates and
+unverified supplied billing. No character-to-token approximation, default model,
+legacy token-total fallback, or zero-for-missing-usage enters the calculation.
+Claude message IDs, cumulative Codex totals and per-model Copilot totals avoid
+native duplicate counting. Mixed-model Codex cumulative usage stays unattributed.
+Explicit task/agent ancestry and `usage_includes_children` prevent summing child
+usage already included in parent totals; unknown overlap blocks aggregation.
+
+Optional `session.pricing` maps each billed model to a quote:
+`{"input_usd_per_million": 2, "source": "provider quote",
+"as_of": "2026-11-24"}`. It uses upstream `ledger`/`pricing` ratios unless an
+explicit normalized `weights` table supplies input/cache-read/cache-write/output
+rates. These are price snapshots, not live tariffs. Unspecified cache-write
+lifetime uses the selected rate's default and is labeled as an assumption.
+Unknown models or partial cache breakdowns stay unpriced. USD values are decimal
+strings. Token equivalents are aggregated only for a single billed model.
+
+`ledger_overhead` accepts upstream mechanism-overhead fields in their recorded
+effective-token units. Its `ledger_overhead_model` and quote allow USD estimation;
+`ledger_overhead_included` declares whether that overhead is already in the
+selected aggregate usage. Other worker/reviewer traces can be supplied with
+`usage_role: "worker"` or `"review"`. Missing overhead is not zero:
+`overhead_complete: true` must explicitly attest coverage. `accounting_complete:
+true` attests full task/worker/review scope; it is a caller assertion, not something
+Prune can independently prove from a partial transcript.
+
+Optional `billing` contains a scope-unique `receipt_id`, decimal `usd`,
+`includes_children`, and `scope_complete`. Duplicate receipts are not added
+twice; their authenticity is not verified. No historical review infers savings.
+The reviewer makes zero model calls; paid consumption of the resulting report
+must be recorded separately if used in a controlled comparison.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
-and coverage limits. Unimplemented checks are explicitly labeled, not passed:
-model-use checks and billed-cost accounting remain future work. There
-are no savings estimates or claims that the whole session was efficient.
+and coverage limits. Implemented checks with missing evidence are explicitly
+unassessable, not passed. There are no historical savings estimates or claims
+that the whole session was efficient.
 
 By default the report goes to stdout. `--output FILE` creates only the requested
 file and refuses to overwrite an existing report or input. Malformed, empty,

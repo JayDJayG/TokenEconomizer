@@ -249,7 +249,7 @@ def test_reports_do_not_invent_state_or_savings_and_are_limited_to_three(tmp_pat
     assert "cost" not in report["findings"][0]
     checks = {check["pattern"]: check["status"] for check in report["checks"]}
     assert checks["redundant_verification"] == "not_assessable"
-    assert checks["cost_accounting"] == "not_implemented"
+    assert checks["cost_accounting"] == "not_assessable"
 
 
 def test_cli_read_only_path_reads_only_the_named_file(tmp_path, monkeypatch, capsys):
@@ -310,7 +310,7 @@ def test_cli_error_has_no_success_report_and_markdown_explains_limits(tmp_path, 
     assert main(["review", str(path)]) == 0
     text = capsys.readouterr().out
     assert "No supported high-confidence cut" in text
-    assert "not_implemented" in text and "Missing evidence is not a passed check" in text
+    assert "not_assessable" in text and "Missing evidence is not a passed check" in text
 
 
 @pytest.mark.parametrize("module,prefix", [

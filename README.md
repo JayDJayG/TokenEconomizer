@@ -87,9 +87,12 @@ execution controls:
 python -m tokeneconomizer.prune review 'C:\sessions\events.jsonl'
 ```
 
-The first slice covers conservative polling findings and reports unimplemented
-checks honestly. See [Prune diagnostics](docs/PRUNE.md) for formats, evidence
-requirements, commands, and limits. The original mechanisms below are unchanged.
+Checks cover polling, duplicate investigation, overfetch, repeated verification,
+agent structure, context/communication, workflow patterns, and model-use
+recommendations, with cache-aware cost reporting. Intent-dependent checks need
+explicit supporting metadata; missing evidence is unassessable, not passed.
+See [Prune diagnostics](docs/PRUNE.md) for formats, evidence requirements,
+commands, and limits. The original mechanisms below are unchanged.
 
 ## Results
 
