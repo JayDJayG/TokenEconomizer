@@ -142,6 +142,12 @@ def validate_facts(facts, location):
             optional_text(facts[name], f"{location}:{name}")
     if "required" in facts and type(facts["required"]) is not bool:
         raise InputError(f"{location}: required must be a boolean")
+    verification = facts.get("verification")
+    if verification is not None:
+        verification = _object(verification, f"{location}:verification")
+        for key in ("deterministic", "unresolved_concerns"):
+            if key in verification and type(verification[key]) is not bool:
+                raise InputError(f"{location}: verification {key} must be a boolean")
     need = facts.get("output_need")
     if need is not None:
         need = _object(need, f"{location}:output_need")

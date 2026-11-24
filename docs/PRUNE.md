@@ -121,11 +121,24 @@ fail explicitly. Without the supplied intent evidence, even a huge result
 remains unassessable. Failed/unknown calls are preserved, and a recommendation
 must retain the full artifact by reference rather than destroy failure evidence.
 
+## Redundant verification
+
+Verification calls need `purpose: "verification"`, `required: false`, and
+`verification: {"deterministic": true, "unresolved_concerns": false}`.
+Both call-start snapshots must completely cover `source`, `tests`,
+`configuration`, `dependencies`, and `environment`. Only consecutive,
+non-overlapping, identical successful checks with matching requests, results,
+state, and turn are findings. Recognized tools include `Bash`, `shell`,
+`powershell`, `run_tests`, `test`, `execute_command`, and `terminal`.
+
+Changed selectors, outputs, inputs, failures, explicit reruns, missing coverage,
+and unresolved concerns prevent a cut. Prune never executes the check itself.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,
 and coverage limits. Unimplemented checks are explicitly labeled, not passed:
-redundant verification, agent graphs,
+agent graphs,
 workflow/model-use checks, and billed-cost accounting remain future work. There
 are no savings estimates or claims that the whole session was efficient.
 

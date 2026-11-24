@@ -4,6 +4,7 @@ from datetime import datetime
 from .types import InputError
 
 READ_SEARCH_TOOLS = {"Read", "Grep", "Glob", "view", "rg", "glob", "read_file", "search"}
+VERIFY_TOOLS = {"Bash", "shell", "powershell", "run_tests", "test", "execute_command", "terminal"}
 VERIFY_COVERS = {"source", "tests", "configuration", "dependencies", "environment"}
 
 
@@ -46,28 +47,25 @@ def input_key(call, covers=()):
     return state["fingerprint"], state["scope"], tuple(sorted(state.get("covers", [])))
 
 
-def duplicate_investigation(trace):
+def _request_key(call, state):
+    if (state is None or call.success is not True or call.result is None
+            or call.turn is None or call.result_line is None or _has_float(call.arguments)):
+        return None
+    return (call.tool, call.turn, json.dumps(call.arguments, sort_keys=True), call.result, state)
+
+
+def _repeated(trace, key_for, pattern, title, replacement, basis):
     findings, eligible, previous, group = [], 0, None, None
     for call in trace.calls:
-        tool = call.tool.rsplit(".", 1)[-1]
-        state = input_key(call)
-        if (tool not in READ_SEARCH_TOOLS or call.facts.get("purpose") != "investigation"
-                or state is None or call.success is not True or call.result is None
-                or call.turn is None or call.result_line is None or _has_float(call.arguments)):
+        key = key_for(call)
+        if key is None:
             previous, group = None, None
             continue
         eligible += 1
-        key = (call.tool, call.turn, json.dumps(call.arguments, sort_keys=True), call.result, state)
         if previous and previous[0] == key and previous[1].result_line < call.line:
             if group is None:
-                group = finding(
-                    trace, [previous[1], call], "duplicate_reads_searches",
-                    "Repeated investigation returned identical evidence",
-                    "Reuse the existing read/search result; repeat after relevant input or "
-                    "purpose changes, or when explicitly required.",
-                    "Equivalent requests and identical results against supplied complete "
-                    "call-start input snapshots; both calls declared non-required.",
-                    tool=call.tool)
+                group = finding(trace, [previous[1], call], pattern, title, replacement,
+                                basis, tool=call.tool)
                 findings.append(group)
             else:
                 group["calls"] += 1
@@ -76,6 +74,39 @@ def duplicate_investigation(trace):
             group = None
         previous = (key, call)
     return findings, eligible
+
+
+def duplicate_investigation(trace):
+    def key(call):
+        if (call.tool.rsplit(".", 1)[-1] not in READ_SEARCH_TOOLS
+                or call.facts.get("purpose") != "investigation"):
+            return None
+        return _request_key(call, input_key(call))
+    return _repeated(
+        trace, key, "duplicate_reads_searches",
+        "Repeated investigation returned identical evidence",
+        "Reuse the existing read/search result; repeat after relevant input or "
+        "purpose changes, or when explicitly required.",
+        "Equivalent requests and identical results against supplied complete "
+        "call-start input snapshots; both calls declared non-required.")
+
+
+def redundant_verification(trace):
+    def key(call):
+        evidence = call.facts.get("verification") or {}
+        if (call.tool.rsplit(".", 1)[-1] not in VERIFY_TOOLS
+                or call.facts.get("purpose") != "verification"
+                or evidence.get("deterministic") is not True
+                or evidence.get("unresolved_concerns") is not False):
+            return None
+        return _request_key(call, input_key(call, VERIFY_COVERS))
+    return _repeated(
+        trace, key, "redundant_verification", "Repeated verification of unchanged inputs",
+        "Reuse the passing check for its exact recorded input state. Rerun after a relevant "
+        "source, test, configuration, dependency, or environment change, a new concern, "
+        "failure, or explicit requirement.",
+        "Identical successful deterministic checks, complete supplied call-start snapshots "
+        "of all verification inputs, and explicit absence of rerun requirements or concerns.")
 
 
 def output_overfetch(trace):

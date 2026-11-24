@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from ..trace import claude_calls, codex_exec_calls, copilot_event_calls
 from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
-from .checks import duplicate_investigation, output_overfetch
+from .checks import duplicate_investigation, output_overfetch, redundant_verification
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -326,6 +326,7 @@ def review(traces: Iterable[Transcript],
     if not traces:
         raise InputError("at least one transcript is required")
     findings, eligible, busy, duplicate_eligible, output_eligible = [], 0, 0, 0, 0
+    verification_eligible = 0
     sources = set()
     for trace in traces:
         if trace.source in sources:
@@ -337,6 +338,9 @@ def review(traces: Iterable[Transcript],
         overfetch, count = output_overfetch(trace)
         findings.extend(overfetch)
         output_eligible += count
+        verification, count = redundant_verification(trace)
+        findings.extend(verification)
+        verification_eligible += count
         previous, group = None, None
         for call in trace.calls:
             poll = _poll(call)
@@ -396,9 +400,12 @@ def review(traces: Iterable[Transcript],
          "status": "assessed" if output_eligible else "not_assessable",
          "reason": "Requires a successful text result and supplied task evidence that a "
                    "specific line selection is sufficient; size alone is never a finding."},
+        {"pattern": "redundant_verification",
+         "status": "assessed" if verification_eligible else "not_assessable",
+         "reason": "Requires successful deterministic checks, full historical source/test/"
+                   "configuration/dependency/environment state, and no required rerun or concern."},
     ]
     for pattern, reason in (
-            ("redundant_verification", "Relevant input state and required reruns must be known."),
             ("agent_graph", "Ancestry, budgets, and justified work need explicit evidence."),
             ("workflow_and_model_use", "Intent and model/task evidence require further checks."),
             ("cost_accounting", "No billed-cost or savings calculation is implemented yet.")):
