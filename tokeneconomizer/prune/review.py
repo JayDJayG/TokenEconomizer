@@ -7,9 +7,11 @@ from typing import Any, Iterable
 from ..trace import claude_calls, codex_exec_calls, copilot_event_calls
 from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
-from .checks import duplicate_investigation, output_overfetch, redundant_verification
+from .checks import (duplicate_investigation, extend_finding, finding as make_finding,
+                     output_overfetch, rank_findings, redundant_verification)
 from .agents import agent_graph, duplicate_delegation
 from .communication import context_forwarding, ping_pong
+from .workflows import fragmented_calls, repeated_planning, reusable_procedures, scope_drift
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -331,6 +333,8 @@ def review(traces: Iterable[Transcript],
     verification_eligible = 0
     delegation_eligible = 0
     context_eligible = 0
+    workflow_counts = {"fragmented_calls": 0, "scope_drift": 0,
+                       "repeated_visible_planning": 0, "reusable_procedure": 0}
     sources = set()
     for trace in traces:
         if trace.source in sources:
@@ -351,6 +355,13 @@ def review(traces: Iterable[Transcript],
         context, count = context_forwarding(trace)
         findings.extend(context)
         context_eligible += count
+        for pattern, detector in (("fragmented_calls", fragmented_calls),
+                                  ("scope_drift", scope_drift),
+                                  ("repeated_visible_planning", repeated_planning),
+                                  ("reusable_procedure", reusable_procedures)):
+            detected, count = detector(trace)
+            findings.extend(detected)
+            workflow_counts[pattern] += count
         previous, group = None, None
         for call in trace.calls:
             poll = _poll(call)
@@ -366,29 +377,24 @@ def review(traces: Iterable[Transcript],
                     and previous[1].result_line < call.line):
                 if group is None:
                     completed = status == "completed"
-                    group = {
-                        "pattern": "completed_agent_rereads" if completed else "busy_polling",
-                        "title": ("Repeated completed-agent retrieval" if completed else
-                                  "Repeated non-blocking polling returned no new information"),
-                        "source": trace.source,
-                        "agent_id": target,
-                        "first_line": previous[1].line,
-                        "last_line": call.result_line,
-                        "calls": 2,
-                        "replacement": (
+                    group = make_finding(
+                        trace, [previous[1], call],
+                        "completed_agent_rereads" if completed else "busy_polling",
+                        "Repeated completed-agent retrieval" if completed else
+                        "Repeated non-blocking polling returned no new information",
+                        (
                             "Reuse the retrieved result; read again only after a new request "
                             "or changed result." if completed else
                             "Use the confirmed completion notifications, then retrieve once; "
                             "keep necessary blocking waits or bounded fallback waiting."),
-                        "evidence_basis": ("recorded completed state and identical results"
+                        ("recorded completed state and identical results"
                                            if completed else
                                            "identical non-blocking results and user-confirmed "
                                            "notification support"),
-                    }
+                        agent_id=target)
                     findings.append(group)
                 else:
-                    group["calls"] += 1
-                    group["last_line"] = call.result_line
+                    extend_finding(group, call)
             else:
                 group = None
             previous = (key, call)
@@ -396,7 +402,7 @@ def review(traces: Iterable[Transcript],
     findings.extend(graph_findings)
     exchanges, communication_eligible, cross_source_order = ping_pong(traces)
     findings.extend(exchanges)
-    findings.sort(key=lambda finding: (-finding["calls"], -finding.get("avoidable_output_bytes", 0)))
+    findings, coalesced = rank_findings(findings)
     checks = [
         {"pattern": "completed_agent_rereads",
          "status": "assessed" if eligible else "not_assessable",
@@ -438,9 +444,17 @@ def review(traces: Iterable[Transcript],
                       "Cross-source ordering is unavailable; only within-source chains are assessed.")},
     ]
     for pattern, reason in (
-            ("workflow_and_model_use", "Intent and model/task evidence require further checks."),
+            ("model_use", "Model/task evidence requires further checks."),
             ("cost_accounting", "No billed-cost or savings calculation is implemented yet.")):
         checks.append({"pattern": pattern, "status": "not_implemented", "reason": reason})
+    for pattern, reason in (
+            ("fragmented_calls", "Requires independent calls, distinct model round trips, and confirmed batching."),
+            ("scope_drift", "Requires complete lexical task scope and explicit non-required/no-information evidence."),
+            ("repeated_visible_planning", "Only visible messages with full input/progress and intent evidence are assessed."),
+            ("reusable_procedure", "Only complete successful, explicitly reusable procedure runs are candidates.")):
+        checks.append({"pattern": pattern,
+                       "status": "assessed" if workflow_counts[pattern] else "not_assessable",
+                       "reason": reason})
     return {
         "schema_version": 1,
         "mode": "advisory",
@@ -451,6 +465,7 @@ def review(traces: Iterable[Transcript],
                     for trace in traces],
         "findings": findings[:3],
         "additional_findings": max(0, len(findings) - 3),
+        "coalesced_findings": coalesced,
         "checks": checks,
         "agent_graph": graph,
         "safeguards": [

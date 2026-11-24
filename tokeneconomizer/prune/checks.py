@@ -14,6 +14,8 @@ def finding(trace, calls, pattern, title, replacement, basis, **details):
         "first_line": min((call.line for call in calls), default=None),
         "last_line": max((call.result_line or call.line for call in calls), default=None),
         "calls": len(calls), "replacement": replacement, "evidence_basis": basis,
+        "call_refs": [{"line": call.line, "call_id": call.call_id, "tool": call.tool}
+                      for call in calls[:8]],
         "safeguards": [
             "Preserve required work, new failures, changed inputs, and user-requested reruns.",
             "This is a recommendation, not a skipped call or an execution control.",
@@ -33,6 +35,15 @@ def _has_float(value):
     if isinstance(value, list):
         return any(_has_float(item) for item in value)
     return False
+
+
+def extend_finding(item, call):
+    item["calls"] += 1
+    item["last_line"] = call.result_line or call.line
+    if len(item["call_refs"]) < 8:
+        item["call_refs"].append({"line": call.line, "call_id": call.call_id, "tool": call.tool})
+    if call.evidence_source and call.evidence_source not in item["evidence_sources"]:
+        item["evidence_sources"].append(call.evidence_source)
 
 
 def input_key(call, covers=()):
@@ -71,12 +82,36 @@ def _repeated(trace, key_for, pattern, title, replacement, basis):
                                 basis, tool=call.tool)
                 findings.append(group)
             else:
-                group["calls"] += 1
-                group["last_line"] = call.result_line
+                extend_finding(group, call)
         else:
             group = None
         previous = (key, call)
     return findings, eligible
+
+
+def rank_findings(findings):
+    def priority(item):
+        category = item.get("classification")
+        return (0 if category == "skill_candidate" else 1 if category else 2)
+    ordered = sorted(findings, key=lambda item: (
+        -priority(item), -max(item["calls"], item.get("planning_messages", 0)),
+        -item.get("avoidable_output_bytes", item.get("avoidable_context_bytes", 0))))
+    selected, coalesced = [], 0
+    for item in ordered:
+        refs = {(ref["line"], ref["call_id"], ref["tool"]) for ref in item.get("call_refs", [])}
+        overlap = next((old for old in selected if old["source"] == item["source"]
+                        and priority(old) == priority(item) == 2
+                        and refs.intersection((ref["line"], ref["call_id"], ref["tool"])
+                                              for ref in old.get("call_refs", []))), None)
+        if overlap is not None:
+            related = overlap.setdefault("related_patterns", [])
+            if item["pattern"] != overlap["pattern"] and item["pattern"] not in related:
+                related.append(item["pattern"])
+                overlap.setdefault("related_replacements", []).append(item["replacement"])
+            coalesced += 1
+        else:
+            selected.append(item)
+    return selected, coalesced
 
 
 def duplicate_investigation(trace):

@@ -1,10 +1,9 @@
 """Verbatim context forwarding and explicitly addressed no-progress exchanges."""
 from collections import deque
-from datetime import datetime
 
 from .agents import SPAWN_TOOLS
-from .checks import finding
-from .types import InputError
+from .checks import extend_finding, finding
+from .types import InputError, epoch as _epoch
 
 MESSAGE_TOOLS = {"write_agent", "send_input"}
 
@@ -70,8 +69,7 @@ def context_forwarding(trace):
                 groups[key] = group
                 findings.append(group)
             else:
-                group["calls"] += 1
-                group["last_line"] = call.result_line or call.line
+                extend_finding(group, call)
                 group["avoidable_context_bytes"] += copied - necessary
     return findings, eligible
 
@@ -95,13 +93,6 @@ def _message(call, trace):
     if not isinstance(receiver, str) or not receiver or not sender or not text or sender == receiver:
         return None
     return sender, receiver, text, facts["conversation_id"], facts["progress_fingerprint"]
-
-
-def _epoch(stamp):
-    if stamp is None:
-        return None
-    value = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    return value.timestamp() if value.tzinfo is not None else None
 
 
 def ping_pong(traces):
