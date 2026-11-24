@@ -154,6 +154,28 @@ input states, plus `spawn` facts: `independent: false`, `completed: true`,
 `result_fingerprint`. Different worker IDs alone do not prove duplicated work.
 Supplied evidence paths are retained as provenance, not new access permissions.
 
+## Context and communication
+
+Forwarding checks require actual verbatim text in a successful worker brief.
+A `forwarding` annotation declares `kind: "conversation"` or `"tool_output"`,
+`source_lines`, `needed_source_lines`, `sufficient: true`,
+`preserves_requirements: true`, and a task-specific `reason`. Conversation
+references must cover all prior recorded visible messages; tool-output
+references point to prior successful result lines. All copies must appear
+in order and without overlapping text spans. Smaller-brief sufficiency is
+supplied evidence, never inferred from length. Byte amplification is observed,
+not a token or dollar estimate. Repeated copies are grouped.
+
+Ping-pong checks recognize `write_agent` and `send_input`. A `communication`
+annotation supplies `conversation_id`, `progress_fingerprint`,
+`new_information: false`, and `required: false`; `sender` can fill missing
+identity and must not contradict native identity. Receivers must match actual
+arguments. Three or more alternating messages must repeat an earlier message
+without changed progress. Other work, new prompts, overlap, or new information
+breaks the chain. Cross-file chains require complete timezone-aware start/end
+and user-event timestamps with no known normalization gaps; otherwise only
+within-file chains are assessed.
+
 ## Limits and output
 
 Reports include at most three cuts, source references, replacements, safeguards,

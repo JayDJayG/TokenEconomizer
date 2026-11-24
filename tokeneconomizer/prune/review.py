@@ -9,6 +9,7 @@ from ..trace.codex import rollout_item_to_exec
 from .evidence import coverage, enrich
 from .checks import duplicate_investigation, output_overfetch, redundant_verification
 from .agents import agent_graph, duplicate_delegation
+from .communication import context_forwarding, ping_pong
 from .types import InputError, ToolCall, Transcript, strict_json as _json
 
 HOSTS = ("claude", "codex", "copilot")
@@ -329,6 +330,7 @@ def review(traces: Iterable[Transcript],
     findings, eligible, busy, duplicate_eligible, output_eligible = [], 0, 0, 0, 0
     verification_eligible = 0
     delegation_eligible = 0
+    context_eligible = 0
     sources = set()
     for trace in traces:
         if trace.source in sources:
@@ -346,6 +348,9 @@ def review(traces: Iterable[Transcript],
         delegation, count = duplicate_delegation(trace)
         findings.extend(delegation)
         delegation_eligible += count
+        context, count = context_forwarding(trace)
+        findings.extend(context)
+        context_eligible += count
         previous, group = None, None
         for call in trace.calls:
             poll = _poll(call)
@@ -389,6 +394,8 @@ def review(traces: Iterable[Transcript],
             previous = (key, call)
     graph_findings, graph, graph_assessable = agent_graph(traces)
     findings.extend(graph_findings)
+    exchanges, communication_eligible, cross_source_order = ping_pong(traces)
+    findings.extend(exchanges)
     findings.sort(key=lambda finding: (-finding["calls"], -finding.get("avoidable_output_bytes", 0)))
     checks = [
         {"pattern": "completed_agent_rereads",
@@ -419,6 +426,16 @@ def review(traces: Iterable[Transcript],
          "status": "assessed" if delegation_eligible else "not_assessable",
          "reason": "Requires equivalent briefs/inputs and explicit completed-result evidence "
                    "of no new information or independent value."},
+        {"pattern": "context_amplification",
+         "status": "assessed" if context_eligible else "not_assessable",
+         "reason": "Requires a verified verbatim copy and explicit smaller-brief sufficiency "
+                   "that preserves requirements; context size alone is not evidence."},
+        {"pattern": "agent_ping_pong",
+         "status": "assessed" if communication_eligible else "not_assessable",
+         "reason": "Requires addressed actors, unchanged progress and non-required messages. "
+                   + ("Cross-source ordering used complete timezone-aware timestamps."
+                      if cross_source_order else
+                      "Cross-source ordering is unavailable; only within-source chains are assessed.")},
     ]
     for pattern, reason in (
             ("workflow_and_model_use", "Intent and model/task evidence require further checks."),
